@@ -1,0 +1,10 @@
+services:
+  klavar-scan:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SCAN_TOKEN: ""        # set a password here if the server is reachable from the internet
+      MAX_UPLOAD_MB: "25"
+      SCAN_WORKERS: "1"
+    restart: unless-stopped

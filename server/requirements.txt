@@ -1,0 +1,7 @@
+oemer==0.1.8
+numpy<2
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+pdf2image==1.17.0
+pillow>=10,<12

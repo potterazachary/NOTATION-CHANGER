@@ -1,0 +1,24 @@
+{
+  "name": "klavar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Klavar: sheet music to Klavarskribo, piano roll, falling notes, jianpu and more (Android and iOS)",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "build:debug": "cap sync android && cd android && ./gradlew assembleDebug",
+    "sync:ios": "cap sync ios",
+    "open:ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/filesystem": "8.1.4",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/share": "8.0.2",
+    "@capgo/capacitor-updater": "8.52.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

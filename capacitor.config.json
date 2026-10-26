@@ -1,0 +1,23 @@
+{
+  "appId": "com.gahoose.klavar",
+  "appName": "Klavar",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "ios": {
+    "contentInset": "never",
+    "scheme": "Klavar"
+  },
+  "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "appReadyTimeout": 15000,
+      "resetWhenUpdate": true
+    }
+  }
+}
