@@ -70,9 +70,8 @@ With a free Apple ID the app stops opening after 7 days; press Run again to rein
 A paid Apple Developer Program membership ($99 a year) removes that limit and lets you
 use TestFlight and the App Store.
 
-No Mac? The **Check iOS build** workflow on GitHub (Actions tab, Run workflow) compiles the
-iOS project on a GitHub Mac to confirm it builds. It can't install the app on a phone,
-because that needs your Apple signing certificate.
+No Mac? The release pipeline builds the iOS app on a GitHub Mac on every push (free for
+public repositories). See section 8 for getting it onto an iPhone without a Mac.
 
 ### iOS notes
 
@@ -181,7 +180,54 @@ On iPhone, everyday updates work the same way once the app is installed. App upd
 have to be installed from Xcode or TestFlight, because Apple doesn't allow installing apps
 from a download link.
 
+## 8. iOS builds in the pipeline
+
+Every release now also contains `klavar-unsigned.ipa`, built on a GitHub Mac. If the iOS build
+ever fails, the Android release still goes out.
+
+iPhones only run apps signed by Apple, so there are two ways to use it:
+
+**TestFlight (recommended, fully automatic, no Mac needed).** Requires the Apple Developer
+Program ($99 a year).
+
+1. In App Store Connect > Apps, create a new app with bundle ID `com.gahoose.klavar`
+   (register the ID under Certificates, Identifiers & Profiles > Identifiers first).
+2. In App Store Connect > Users and Access > Integrations > App Store Connect API, create a
+   key with the **Admin** role. Download the `.p8` file (you only get one chance) and note the
+   Key ID and Issuer ID.
+3. Find your Team ID under Membership details on developer.apple.com.
+4. Add four repository secrets (Settings > Secrets and variables > Actions), or from your
+   Codespace after uploading the `.p8` file:
+   ```
+   gh secret set APPSTORE_KEY_ID --body "YOUR_KEY_ID"
+   gh secret set APPSTORE_ISSUER_ID --body "YOUR_ISSUER_ID"
+   gh secret set APPLE_TEAM_ID --body "YOUR_TEAM_ID"
+   gh secret set APPSTORE_KEY_P8 < AuthKey_YOUR_KEY_ID.p8
+   rm AuthKey_YOUR_KEY_ID.p8
+   ```
+5. Push. Each build is signed and uploaded to TestFlight. Install the TestFlight app on the
+   iPhone, accept the invite (add yourself under TestFlight > Internal Testing), and new native
+   versions install from there. Everyday updates still arrive over the air.
+
+**Sideloading the unsigned IPA (free Apple ID).** Tools such as SideStore or AltStore re-sign
+the IPA with your own Apple ID. They need a computer (Windows works) for the first setup, and
+free-account apps must be refreshed every 7 days.
+
+## 9. Updating from a phone (no Codespace needed)
+
+Changes can arrive as a file named `klavar-update-<something>.zip`. To apply one:
+
+1. On github.com (Chrome, Desktop site on), open the repository's main page.
+2. Tap **Add file > Upload files**, choose the zip, and tap **Commit changes**.
+
+The **Apply update zip** workflow unpacks it over the project, deletes the zip, commits, and
+starts a new release build. Installed apps then update themselves as usual.
+
+Workflow files (in `.github/workflows`) can't be changed this way, because GitHub doesn't let
+automated jobs edit workflows. Upload those by hand: open the `.github/workflows` folder on
+github.com, then **Add file > Upload files**; a file with the same name replaces the old one.
+
 ## Licenses of included parts
 
-Capacitor (MIT), Capgo capacitor-updater (MPL-2.0), OpenSheetMusicDisplay (BSD-3-Clause), JSZip (MIT), oemer (MIT),
+Capacitor (MIT), Capgo capacitor-updater (MPL-2.0), keep-awake (MIT), OpenSheetMusicDisplay (BSD-3-Clause), JSZip (MIT), oemer (MIT),
 FastAPI (MIT). Fonts load from Google Fonts when online and fall back to system fonts offline.

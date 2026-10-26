@@ -200,6 +200,12 @@ input[type=range]:disabled{opacity:.4}
           <option value="jianpu">Numbered notation (简谱 jianpu)</option>
         </select></label>
       <label class="check"><input type="checkbox" id="scrollMode" checked> Scroll the music into the keyboard</label>
+      <label class="row">Keep the screen on
+        <select id="awake">
+          <option value="open">While Klavar is open</option>
+          <option value="play">Only while playing</option>
+          <option value="off">Never (use the phone’s setting)</option>
+        </select></label>
       <label class="row">Time spacing
         <input type="range" id="ppq" min="16" max="120" value="44"></label>
       <label class="row">Pitch spacing
@@ -1321,12 +1327,14 @@ function play(){
   schedule(); P.timer = setInterval(schedule, 25);
   P.raf = requestAnimationFrame(frame);
   $('play').textContent = '❚❚ Pause';
+  updateAwake();
 }
 function pause(){
   if (!P.playing) return;
   P.pos = currentQ(); P.playing = false;
   clearInterval(P.timer); cancelAnimationFrame(P.raf); silence();
   $('play').textContent = '▶ Play';
+  updateAwake();
   drawPlay(P.pos);
 }
 function stop(){
@@ -1847,6 +1855,35 @@ spl.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight'){ e.preventDefault(); setSide(w + 20); }
 });
 spl.addEventListener('dblclick', () => setSide(310));
+
+/* ---------- Keep the screen on ---------- */
+let wakeSentinel = null;
+async function setAwake(on){
+  const ka = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.KeepAwake;
+  if (ka && Capacitor.isNativePlatform && Capacitor.isNativePlatform()){
+    try { await (on ? ka.keepAwake() : ka.allowSleep()); return; } catch (e) {}
+  }
+  try {
+    if (on && 'wakeLock' in navigator && document.visibilityState === 'visible'){
+      if (!wakeSentinel){
+        wakeSentinel = await navigator.wakeLock.request('screen');
+        wakeSentinel.addEventListener('release', () => { wakeSentinel = null; });
+      }
+    } else if (!on && wakeSentinel){ await wakeSentinel.release(); wakeSentinel = null; }
+  } catch (e) {}
+}
+function updateAwake(){
+  const m = $('awake').value;
+  setAwake(m === 'open' || (m === 'play' && P.playing));
+}
+try { const a = localStorage.getItem('klavar-awake'); if (a) $('awake').value = a; } catch (e) {}
+$('awake').addEventListener('change', () => {
+  try { localStorage.setItem('klavar-awake', $('awake').value); } catch (e) {}
+  updateAwake();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) updateAwake(); });
+document.addEventListener('pointerdown', () => { if (!wakeSentinel) updateAwake(); }, { passive: true });
+updateAwake();
 
 $('print').addEventListener('click', () => window.print());
 $('sample').addEventListener('click', () => { try { stop(); piece = parseMusicXML(buildSample()); resetEdits(); setTempo(); render(); resetScroll(); } catch (e){ showError(e); } });
