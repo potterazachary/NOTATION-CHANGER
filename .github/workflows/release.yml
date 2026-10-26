@@ -1,11 +1,13 @@
 name: Build and publish Klavar
 
-# Runs on every push to main (and on demand). Builds the Android app, then publishes
-# a release containing the APK, the web bundle for over-the-air updates, and
-# version.json, which installed apps check to find updates.
+# On every push to main (or on demand): builds the Android app and the iOS app in
+# parallel, then publishes one release with the APK, the iOS app, the web bundle for
+# over-the-air updates, and version.json, which installed apps check for updates.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'klavar-update*.zip'
   workflow_dispatch:
 
 permissions:
@@ -15,64 +17,138 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  RELEASE_REPO: ${{ vars.RELEASE_REPO || github.repository }}
+  WEB_BUILD: ${{ github.run_number }}
+
 jobs:
-  release:
+  android:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_REPO: ${{ vars.RELEASE_REPO || github.repository }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-
-      - name: Work out version numbers
-        run: |
-          echo "WEB_BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"
-          echo "NATIVE_BUILD=$(tr -dc '0-9' < native-version.txt)" >> "$GITHUB_ENV"
-
+      - name: Version numbers
+        run: echo "NATIVE_BUILD=$(tr -dc '0-9' < native-version.txt)" >> "$GITHUB_ENV"
       - name: Stamp the build number and update address into the app
         run: |
           FEED="https://github.com/${RELEASE_REPO}/releases/latest/download/version.json"
           echo "window.KLAVAR_BUILD = { web: ${WEB_BUILD}, native: ${NATIVE_BUILD}, feed: '${FEED}' };" > www/build-info.js
-
       - run: npm ci
       - run: npx cap sync android
-
       - name: Use the permanent signing key
         env:
           KEY: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
         run: |
           if [ -z "$KEY" ]; then
-            echo "::warning::ANDROID_DEBUG_KEYSTORE secret is not set. Each build gets a different key, so updates will not install over each other."
+            echo "::warning::ANDROID_DEBUG_KEYSTORE secret is not set. Updates will not install over each other."
             exit 0
           fi
           mkdir -p ~/.android
           echo "$KEY" | base64 -d > ~/.android/debug.keystore
-
       - name: Build the APK
         run: |
           chmod +x android/gradlew
           cd android && ./gradlew assembleDebug -PversionCode=${NATIVE_BUILD} -PversionName=1.${NATIVE_BUILD}.${WEB_BUILD}
-
-      - name: Package the release files
+      - name: Collect files
         run: |
           mkdir dist
           cp android/app/build/outputs/apk/debug/app-debug.apk dist/klavar.apk
           (cd www && zip -qr ../dist/web-bundle.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/
+
+  ios:
+    runs-on: macos-15
+    # An iOS problem never blocks the Android release.
+    continue-on-error: true
+    env:
+      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+      KEY_P8: ${{ secrets.APPSTORE_KEY_P8 }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Version numbers
+        run: echo "NATIVE_BUILD=$(tr -dc '0-9' < native-version.txt)" >> "$GITHUB_ENV"
+      - name: Stamp the build number and update address into the app
+        run: |
+          FEED="https://github.com/${RELEASE_REPO}/releases/latest/download/version.json"
+          echo "window.KLAVAR_BUILD = { web: ${WEB_BUILD}, native: ${NATIVE_BUILD}, feed: '${FEED}' };" > www/build-info.js
+      - run: npm ci
+      - run: npx cap sync ios
+
+      - name: Build the unsigned iOS app
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION=1.${NATIVE_BUILD} CURRENT_PROJECT_VERSION=${WEB_BUILD} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p dist/Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app dist/Payload/
+          (cd dist && zip -qry klavar-unsigned.ipa Payload && rm -rf Payload)
+
+      - name: Sign and upload to TestFlight (only when Apple secrets are set)
+        if: env.KEY_ID != '' && env.ISSUER_ID != '' && env.KEY_P8 != '' && env.TEAM_ID != ''
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
+          printf '%s' "$KEY_P8" > "$KEY_PATH"
+          AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY_PATH -authenticationKeyID $KEY_ID -authenticationKeyIssuerID $ISSUER_ID"
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/Klavar.xcarchive \
+            DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION=1.${NATIVE_BUILD} CURRENT_PROJECT_VERSION=${WEB_BUILD} \
+            $AUTH archive
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/Klavar.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export $AUTH
+          echo "Uploaded build ${WEB_BUILD} to App Store Connect. It appears in TestFlight after Apple finishes processing (usually 5-30 minutes)."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/
+
+  publish:
+    needs: [android, ios]
+    if: ${{ always() && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble the release
+        run: |
+          NATIVE_BUILD=$(tr -dc '0-9' < native-version.txt)
+          mkdir dist
+          cp artifacts/android/* dist/
+          if [ -d artifacts/ios ]; then cp artifacts/ios/* dist/; else echo "::warning::No iOS build this time; publishing Android only."; fi
           BASE="https://github.com/${RELEASE_REPO}/releases/download/build-${WEB_BUILD}"
           printf '{"web": %s, "native": %s, "bundle": "%s/web-bundle.zip", "apk": "%s/klavar.apk"}\n' \
             "$WEB_BUILD" "$NATIVE_BUILD" "$BASE" "$BASE" > dist/version.json
-          cat dist/version.json
-
-      - name: Publish the release
-        uses: softprops/action-gh-release@v2
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
         with:
           repository: ${{ env.RELEASE_REPO }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}

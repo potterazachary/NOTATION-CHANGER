@@ -1,0 +1,55 @@
+name: Apply update zip
+
+# Upload a file named klavar-update-<anything>.zip to the top of the repository (for example
+# with "Add file > Upload files" on github.com). This unpacks it over the project, removes
+# the zip, commits the result, and starts a new release build.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'klavar-update*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack the update
+        run: |
+          shopt -s nullglob
+          zips=(klavar-update*.zip)
+          if [ ${#zips[@]} -eq 0 ]; then echo "No klavar-update*.zip at the top of the repository."; exit 0; fi
+          for z in "${zips[@]}"; do
+            echo "Applying $z"
+            rm -rf /tmp/upd && mkdir /tmp/upd && unzip -q "$z" -d /tmp/upd
+            src=/tmp/upd
+            top=$(ls -A /tmp/upd)
+            if [ "$(echo "$top" | wc -l)" = 1 ] && [ -d "/tmp/upd/$top" ] && [[ "$top" == klavar* ]]; then src="/tmp/upd/$top"; fi
+            if [ -d "$src/.github" ]; then
+              echo "::warning::This update contains workflow files. GitHub doesn't allow automated changes to workflows, so upload those by hand into .github/workflows."
+              rm -rf "$src/.github"
+            fi
+            rm -rf "$src/node_modules"
+            cp -R "$src/." .
+            git rm -q "$z"
+          done
+
+      - name: Commit the update
+        run: |
+          git config user.name "klavar-bot"
+          git config user.email "klavar-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing changed."; exit 0; fi
+          git commit -m "Apply update"
+          git push
+
+      - name: Start the release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref main
