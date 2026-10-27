@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<meta name="theme-color" content="#14171D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Klavar">
 <title>Klavar — sheet music to Klavarskribo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -496,9 +504,11 @@ function parseMSCX(text){
 }
 
 async function readFile(file){
-  const name = file.name.toLowerCase();
-  if (/\.(mxl|zip|mscz)$/.test(name)){
-    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  // Decide by the file's contents, not its name: phones often hide or change extensions.
+  const buf = await file.arrayBuffer();
+  const head = new Uint8Array(buf.slice(0, 2));
+  if (head[0] === 0x50 && head[1] === 0x4B){
+    const zip = await JSZip.loadAsync(buf);
     let path = null;
     const container = zip.file('META-INF/container.xml');
     if (container){
@@ -506,10 +516,10 @@ async function readFile(file){
       path = c.querySelector('rootfile')?.getAttribute('full-path');
     }
     if (!path) path = Object.keys(zip.files).find(p => !p.startsWith('META-INF') && /\.(xml|musicxml|mscx)$/i.test(p));
-    if (!path || !zip.file(path)) throw new Error('Could not find the score inside this .mxl file.');
+    if (!path || !zip.file(path)) throw new Error('This file is compressed, but there\u2019s no MusicXML or MuseScore score inside it.');
     return zip.file(path).async('string');
   }
-  return file.text();
+  return new TextDecoder().decode(buf);
 }
 
 /* ---------- Rendering ---------- */
@@ -1410,6 +1420,9 @@ function setTempo(){
 
 /* ---------- Wiring ---------- */
 const drop = $('drop'), input = $('file');
+// Android's file picker hides files whose type it doesn't recognise (such as .mscz and .mxl),
+// so let it show everything there and check the file after it's chosen.
+if (/Android/i.test(navigator.userAgent)) input.removeAttribute('accept');
 drop.addEventListener('click', () => input.click());
 drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); } });
 input.addEventListener('change', () => { if (input.files[0]) load(input.files[0]); input.value = ''; });
@@ -1833,6 +1846,33 @@ if (isNative){
     setTimeout(() => checkForUpdates(false), 3000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdates(false); });
   }
+}
+
+/* ---------- Installable web app (GitHub Pages): offline support and Share to Klavar ---------- */
+if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:'){
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      if (!w) return;
+      w.addEventListener('statechange', () => {
+        if (w.state === 'installed' && navigator.serviceWorker.controller)
+          showUpdBar('A new version of Klavar is ready.', 'Reload', () => location.reload());
+      });
+    });
+  }).catch(() => {});
+}
+if (new URLSearchParams(location.search).has('shared') && 'caches' in window){
+  (async () => {
+    try {
+      const c = await caches.open('klavar-share');
+      const r = await c.match('shared-file');
+      if (!r) return;
+      const name = decodeURIComponent(r.headers.get('x-name') || 'shared-score');
+      await c.delete('shared-file');
+      load(new File([await r.blob()], name));
+    } catch (e) {}
+    history.replaceState(null, '', location.pathname);
+  })();
 }
 
 /* ---------- Resizable control panel ---------- */
