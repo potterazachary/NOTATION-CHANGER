@@ -61,6 +61,15 @@ input[type=url],input[type=password]{font:inherit;font-size:14px;padding:6px 8px
 .updbar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--ink);color:var(--paper);padding:10px 14px;border-radius:10px;z-index:30;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 .updbar button{background:var(--paper);color:var(--ink);border:0;flex:none}
 .appinfo{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted)}
+.chordbtn{width:100%}
+.dlg{border:1px solid var(--rule);border-radius:12px;background:var(--paper);color:var(--ink);padding:20px;width:min(660px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto}
+.dlg::backdrop{background:rgba(0,0,0,.45)}
+.dlg h3{font:400 28px/1.1 "Instrument Serif",Georgia,serif;margin:0 0 6px}
+.dlg textarea{width:100%;min-height:180px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:8px 10px;border-radius:6px;border:1px solid var(--rule);background:var(--panel);color:var(--ink);resize:vertical}
+.dlg input[type=text],.dlg input[type=number]{font:inherit;font-size:14px;padding:6px 8px;border-radius:6px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);width:100%}
+.dlg .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin:12px 0}
+.dlg .btns{margin-top:12px}
+@media (max-width:540px){.dlg .grid2{grid-template-columns:1fr}}
 .selinfo{font-size:13px;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
 button.on{background:var(--ph);color:#fff;border-color:var(--ph)}
 .editing .score svg{cursor:crosshair;touch-action:none}
@@ -126,6 +135,10 @@ input[type=range]:disabled{opacity:.4}
   aside{border-right:0;border-bottom:1px solid var(--rule)}
   main{height:80vh}
 }
+.fbadge{font-size:13px;font-weight:600;color:#fff;background:var(--ph);padding:6px 10px;border-radius:999px}
+[data-k].lit-want{fill:var(--ph)}
+[data-k].lit-ok{fill:#2BB673}
+[data-k].lit-bad{fill:#E5484D}
 @media print{
   aside,.kbd,.transport,#toggleSide,.splitter,.toast{display:none}
   .app{display:block}
@@ -148,6 +161,7 @@ input[type=range]:disabled{opacity:.4}
       <span>Drop it here or click to browse<br>MusicXML (.musicxml, .xml, .mxl) or MuseScore (.mscz)</span>
       <input type="file" id="file" accept=".xml,.musicxml,.mxl,.zip,.mscz,.mscx" hidden>
     </div>
+    <button class="chordbtn" id="chordBtn">🎸 Import a chord chart</button>
 
     <div class="scan">
       <div class="btns">
@@ -192,6 +206,23 @@ input[type=range]:disabled{opacity:.4}
         <button id="redo">Redo</button>
         <button id="addBar">Add measure</button>
       </div>
+    </fieldset>
+
+    <fieldset class="follow">
+      <legend>Play along</legend>
+      <label class="row">Listen to
+        <select id="fMode">
+          <option value="off">Nothing (Klavar plays everything)</option>
+          <option value="midi">My MIDI keyboard</option>
+          <option value="mic">The microphone</option>
+        </select></label>
+      <label class="row">You play
+        <select id="fHands"><option value="both">Both hands</option><option value="R">Right hand</option><option value="L">Left hand</option></select></label>
+      <label class="row">Timing window (how early or late still counts)
+        <select id="fTol"><option value="0.125">⅛ beat</option><option value="0.25" selected>¼ beat</option><option value="0.5">½ beat</option><option value="1">1 beat</option></select></label>
+      <label class="check"><input type="checkbox" id="fAccomp" checked> Play the other hand for me</label>
+      <label class="check" id="fOctRow" hidden><input type="checkbox" id="fOct"> Microphone: the octave must match too</label>
+      <div class="selinfo" id="fStatus">Choose MIDI keyboard or microphone, then press Play. Klavar waits for you at each note.</div>
     </fieldset>
 
     <fieldset>
@@ -326,6 +357,7 @@ input[type=range]:disabled{opacity:.4}
           <option value="harmonica">Harmonica</option>
           <option value="vocal">Vocal (ah)</option>
         </select>
+        <span class="fbadge" id="fBadge" hidden></span>
       </div>
     </div>
     <div class="scroller" id="scroller">
@@ -336,6 +368,26 @@ input[type=range]:disabled{opacity:.4}
   </main>
 </div>
 
+<dialog class="dlg" id="chordDlg" aria-labelledby="chHead">
+  <h3 id="chHead">Import a chord chart</h3>
+  <p class="hint">Paste chords from a chord website, or type your own. Lyric lines are skipped. Use | for bar lines, [Verse] or [Chorus] for sections, x2 to repeat a line or section, and % to repeat the previous bar.</p>
+  <textarea id="chText" spellcheck="false" placeholder="[Verse]&#10;G   Em   C   D&#10;&#10;[Chorus] x2&#10;| C | G | Am7  D | G |"></textarea>
+  <div class="btns"><button id="chPaste">Paste from clipboard</button></div>
+  <div class="grid2">
+    <label class="row">Title <input type="text" id="chTitle" placeholder="My song"></label>
+    <label class="row">Time signature
+      <select id="chTime"><option value="4/4">4/4</option><option value="3/4">3/4</option><option value="6/8">6/8</option><option value="2/4">2/4</option></select></label>
+    <label class="row">Tempo (beats per minute) <input type="number" id="chTempo" min="30" max="240" value="100"></label>
+    <label class="row">Each chord lasts
+      <select id="chLen"><option value="auto">1 bar, or as the | bar lines show</option><option value="0.5">Half a bar</option><option value="2">2 bars</option><option value="beat">1 beat</option></select></label>
+    <label class="row">Accompaniment
+      <select id="chStyle"><option value="pop">Bass + chord on every beat</option><option value="held">Bass + held chord</option><option value="arp">Bass + broken chord</option><option value="oompah">Oom-pah (bass, then chords)</option></select></label>
+    <label class="row">Transpose <select id="chTrans"></select></label>
+  </div>
+  <label class="check"><input type="checkbox" id="chCapo" checked> <span id="chCapoLbl">Add the capo to the pitch (no capo found)</span></label>
+  <div class="selinfo" id="chInfo" style="margin-top:10px">Paste a chart to see what was found.</div>
+  <div class="btns"><button class="primary" id="chMake">Create score</button><button id="chCancel">Cancel</button></div>
+</dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="updbar" id="updBar" hidden><span id="updText"></span><button id="updBtn"></button></div>
 <script>
@@ -1210,17 +1262,48 @@ function buildSample(){
 }
 
 /* ---------- Playback ---------- */
+const F = { mode: 'off', events: [], i: 0, hold: null };
 let curNotes = [], outNotes = [], geom = null, actx = null, master = null, voices = [];
 const P = { playing: false, pos: 0, startQ: 0, startT: 0, spq: .6, idx: 0, sorted: [], timer: null, raf: null, lit: new Map() };
 
+let silentEl = null;
+function silentWavUrl(){
+  const n = 2000, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) b[o + i] = s.charCodeAt(i); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  w(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+function iosUnmute(){
+  // iPhone and iPad treat web audio as background sound that the silent setting mutes, and
+  // home-screen web apps often start with it muted. Ask for music-style playback instead.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && 'ontouchend' in document);
+  const nativeApp = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
+  if (!ios || nativeApp) return;
+  try {
+    if (!silentEl){
+      silentEl = document.createElement('audio');
+      silentEl.src = silentWavUrl(); silentEl.loop = true;
+      silentEl.setAttribute('playsinline', ''); silentEl.preload = 'auto';
+    }
+    const p = silentEl.play(); if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
 function audio(){
+  iosUnmute();
   if (!actx){
     actx = new (window.AudioContext || window.webkitAudioContext)();
     const comp = actx.createDynamicsCompressor();
     master = actx.createGain(); master.gain.value = .5;
     master.connect(comp); comp.connect(actx.destination);
+    // A silent sample played during the tap unlocks sound output on iPhone and iPad.
+    const buf = actx.createBuffer(1, 1, 22050), src = actx.createBufferSource();
+    src.buffer = buf; src.connect(actx.destination); src.start(0);
   }
-  if (actx.state === 'suspended') actx.resume();
+  if (actx.state !== 'running'){ const r = actx.resume(); if (r && r.catch) r.catch(() => {}); }
   return actx;
 }
 function voice(midi, t, dur){
@@ -1313,7 +1396,10 @@ function silence(){
   voices.forEach(v => { try { v.g.gain.cancelScheduledValues(t); v.g.gain.setTargetAtTime(0, t, .03); v.oscs.forEach(o => o.stop(t + .2)); } catch (e) {} });
   voices = [];
 }
-function playable(){ const h = $('playHands').value; return h === 'both' ? curNotes : curNotes.filter(n => n.hand === h); }
+function playable(){
+  if (F.mode !== 'off') return $('fAccomp').checked ? curNotes.filter(n => !userHand(n)) : [];
+  const h = $('playHands').value; return h === 'both' ? curNotes : curNotes.filter(n => n.hand === h);
+}
 function currentQ(){ return P.playing ? Math.max(P.startQ, P.startQ + (actx.currentTime - P.startT) / P.spq) : P.pos; }
 function rebase(q){
   P.spq = 60 / +$('tempo').value;
@@ -1333,7 +1419,7 @@ function play(){
   if (!piece || P.playing) return;
   audio();
   if (P.pos >= piece.total - 1e-6) P.pos = 0;
-  P.playing = true; rebase(P.pos);
+  P.playing = true; rebase(P.pos); followStart(P.pos);
   schedule(); P.timer = setInterval(schedule, 25);
   P.raf = requestAnimationFrame(frame);
   $('play').textContent = '❚❚ Pause';
@@ -1341,8 +1427,10 @@ function play(){
 }
 function pause(){
   if (!P.playing) return;
-  P.pos = currentQ(); P.playing = false;
+  P.pos = F.hold ? F.hold.onset : currentQ(); P.playing = false;
+  F.hold = null; clearWant(); followBadge('');
   clearInterval(P.timer); cancelAnimationFrame(P.raf); silence();
+  if (silentEl) silentEl.pause();
   $('play').textContent = '▶ Play';
   updateAwake();
   drawPlay(P.pos);
@@ -1353,10 +1441,10 @@ function stop(){
 }
 function seek(q){
   q = clamp(q, 0, piece.total);
-  if (P.playing){ silence(); rebase(q); } else { P.pos = q; drawPlay(q); }
+  if (P.playing){ silence(); rebase(q); followStart(q); clearInterval(P.timer); P.timer = setInterval(schedule, 25); } else { P.pos = q; drawPlay(q); }
 }
 function frame(){
-  const q = currentQ();
+  const q = followTick(currentQ());
   if (q >= piece.total){ pause(); P.pos = piece.total; clearLit(); return; }
   drawPlay(q, true);
   P.raf = requestAnimationFrame(frame);
@@ -1511,8 +1599,8 @@ function toast(msg){
 }
 function saveDoc(){
   try {
-    const { title, composer, notes, measures, total, tempo, parts, edited } = piece;
-    localStorage.setItem('klavar-doc', JSON.stringify({ title, composer, notes, measures, total, tempo, parts, edited }));
+    const { title, composer, notes, measures, total, tempo, parts, edited, chords } = piece;
+    localStorage.setItem('klavar-doc', JSON.stringify({ title, composer, notes, measures, total, tempo, parts, edited, chords }));
   } catch (e) {}
 }
 function resetEdits(){ undoStack = []; redoStack = []; selNote = null; saveDoc(); }
@@ -1861,6 +1949,16 @@ if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:')
     });
   }).catch(() => {});
 }
+if (new URLSearchParams(location.search).has('sharedtext') && 'caches' in window){
+  (async () => {
+    try {
+      const c = await caches.open('klavar-share');
+      const r = await c.match('shared-text');
+      if (r){ await c.delete('shared-text'); openChordDialog(await r.text()); }
+    } catch (e) {}
+    history.replaceState(null, '', location.pathname);
+  })();
+}
 if (new URLSearchParams(location.search).has('shared') && 'caches' in window){
   (async () => {
     try {
@@ -1924,6 +2022,391 @@ $('awake').addEventListener('change', () => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) updateAwake(); });
 document.addEventListener('pointerdown', () => { if (!wakeSentinel) updateAwake(); }, { passive: true });
 updateAwake();
+
+/* ---------- Chord chart import ---------- */
+const NAMES_FLAT = ['C','D\u266d','D','E\u266d','E','F','G\u266d','G','A\u266d','A','B\u266d','B'];
+const CH_RE = /^\(?([A-G])([#b\u266f\u266d]?)([^\s\/]*?)(?:\/([A-G][#b\u266f\u266d]?))?\)?$/;
+const QUAL_OK = /^(maj|ma|min|mi|m|M|dim|aug|sus|add|alt|no|omit|\+|-|\u00b0|o|\u00f8|\u0394|\d|\(|\)|#|b|\u266d|\u266f|,)*$/;
+const accOf = s => (s === '#' || s === '\u266f') ? 1 : (s === 'b' || s === '\u266d') ? -1 : 0;
+function parseChordName(tok){
+  const m = tok.match(CH_RE);
+  if (!m || !QUAL_OK.test(m[3])) return null;
+  const root = (STEP[m[1]] + accOf(m[2]) + 12) % 12;
+  const bass = m[4] ? (STEP[m[4][0]] + accOf(m[4].slice(1)) + 12) % 12 : null;
+  return { root, bass, q: m[3], flat: /[b\u266d]/.test(m[2] + (m[4] || '').slice(1)) };
+}
+function chordIntervals(q){
+  const s = q.replace(/\u266f/g, '#').replace(/\u266d/g, 'b');
+  const noAdd = s.replace(/(add|no|omit)\d+/g, '');
+  let third = 4, fifth = 7;
+  const ext = [];
+  const isMaj = /^(maj|ma|M|\u0394)/.test(s);
+  if (!isMaj && /^(min|mi|m|-)/.test(s)) third = 3;
+  const dim = /^(dim|\u00b0|o)/.test(s), half = /^\u00f8/.test(s) || /m7b5|mi7b5|min7b5/.test(s);
+  if (dim || half){ third = 3; fifth = 6; }
+  if (/^(aug|\+)/.test(s) || /#5|\+5/.test(s)) fifth = 8;
+  if (/b5/.test(s) && !half) fifth = 6;
+  if (/sus2/.test(s)) third = 2; else if (/sus/.test(s)) third = 5;
+  if (/^5$/.test(s) || /no3/.test(s)) third = null;
+  const hasExt = /(7|9|11|13)/.test(noAdd);
+  if (half) ext.push(10);
+  else if (dim && /7/.test(s)) ext.push(9);
+  else if (hasExt) ext.push(/(maj|ma|M|\u0394)(7|9|11|13)/.test(s) || /^\u0394/.test(s) ? 11 : 10);
+  if (/(^|[^#b\d])9/.test(noAdd)) ext.push(14);
+  if (/(^|[^#b\d])11/.test(noAdd)) ext.push(17);
+  if (/(^|[^#b\d])13/.test(noAdd)) ext.push(21);
+  if (/(^|[^\d])6/.test(noAdd) && !/13/.test(noAdd)) ext.push(9);
+  for (const a of s.matchAll(/add(\d+)/g)){ const v = { 2: 14, 9: 14, 4: 17, 11: 17, 6: 9, 13: 21 }[a[1]]; if (v) ext.push(v); }
+  if (/b9/.test(s)) ext.push(13);
+  if (/#9/.test(s)) ext.push(15);
+  if (/#11/.test(s)) ext.push(18);
+  if (/b13/.test(s)) ext.push(20);
+  const iv = [0];
+  if (third !== null) iv.push(third);
+  iv.push(fifth, ...ext);
+  return [...new Set(iv)].sort((a, b) => a - b);
+}
+function voiceChord(root, iv, prev){
+  let use = iv.slice();
+  if (use.length > 4 && use.includes(7)) use = use.filter(i => i !== 7);
+  if (use.length > 4) use = [use[0], ...use.slice(-3)];
+  const cands = [];
+  for (let base = 45; base <= 70; base++){
+    if (base % 12 !== root) continue;
+    const notes = use.map(i => base + i);
+    for (let k = 0; k < notes.length; k++){
+      const c = notes.map((n, i) => i < k ? n + 12 : n).sort((a, b) => a - b);
+      if (c[0] >= 52 && c[c.length - 1] <= 81) cands.push(c);
+    }
+  }
+  if (!cands.length) return use.map(i => 60 + ((root + i) % 24));
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const target = prev ? mean(prev) : 65;
+  cands.sort((a, b) => (Math.abs(mean(a) - target) + (a[a.length - 1] - a[0]) * .05) - (Math.abs(mean(b) - target) + (b[b.length - 1] - b[0]) * .05));
+  return cands[0];
+}
+function chartLines(text){
+  const out = [];
+  for (const rawLine of text.replace(/\r/g, '').split('\n')){
+    const line = rawLine.replace(/\[\/?(ch|tab)\]/gi, '').trim();
+    if (!line) continue;
+    let h = line.match(/^\[([^\]]+)\]\s*(?:\(?\s*[x\u00d7]\s*(\d+)\s*\)?|\(?\s*(\d+)\s*[x\u00d7]\s*\)?)?\s*$/i)
+      || line.match(/^((?:intro|verse|chorus|bridge|outro|pre-?chorus|interlude|solo|refrain|instrumental|coda|tag|hook|break)[^:]{0,12}):?\s*(?:\(?\s*[x\u00d7]\s*(\d+)\s*\)?)?\s*$/i);
+    if (h){ out.push({ header: h[1].trim(), times: +(h[2] || h[3] || 1) }); continue; }
+    const toks = line.replace(/\|/g, ' | ').split(/\s+/).filter(Boolean);
+    let times = 1;
+    const last = toks[toks.length - 1];
+    const rep = last && (last.match(/^\(?[x\u00d7](\d+)\)?$/i) || last.match(/^\(?(\d+)[x\u00d7]\)?$/i));
+    if (rep){ times = +rep[1]; toks.pop(); }
+    const items = []; let ok = toks.length > 0, chords = 0;
+    for (const t of toks){
+      if (t === '|' || t === '||' ) items.push({ bar: true });
+      else if (t === '%') items.push({ same: true });
+      else if (t === '-' || t === '/' || t === '.' || t === ':' || /^\|?:?\|?$/.test(t)) continue;
+      else if (/^n\.?c\.?$/i.test(t)){ items.push({ nc: true }); chords++; }
+      else { const c = parseChordName(t); if (!c){ ok = false; break; } items.push({ chord: c, name: t }); chords++; }
+    }
+    if (ok && chords) out.push({ items, times, bars: items.some(i => i.bar) });
+  }
+  return out;
+}
+function buildChart(text, opt){
+  const [bN, bD] = opt.time.split('/').map(Number);
+  const beatQ = 4 / bD, barQ = bN * beatQ;
+  const lines = chartLines(text);
+  const sections = [];
+  let cur = { name: '', times: 1, lines: [] };
+  lines.forEach(l => {
+    if (l.header){ if (cur.lines.length || cur.name) sections.push(cur); cur = { name: l.header, times: l.times, lines: [] }; }
+    else cur.lines.push(l);
+  });
+  if (cur.lines.length) sections.push(cur);
+  const segs = []; let q = 0, prevBar = null, prevChord = null;
+  const per = opt.len === 'beat' ? beatQ : opt.len === '0.5' ? barQ / 2 : opt.len === '2' ? barQ * 2 : barQ;
+  const add = (it, d) => {
+    if (it.nc) segs.push({ q, dur: d, chord: null });
+    else segs.push({ q, dur: d, chord: it.chord, name: it.name });
+    prevChord = it; q += d;
+  };
+  for (const sec of sections) for (let r = 0; r < sec.times; r++) for (const ln of sec.lines) for (let lr = 0; lr < ln.times; lr++){
+    if (ln.bars && opt.len === 'auto'){
+      const cells = []; let cell = [];
+      ln.items.forEach(it => { if (it.bar){ if (cell.length) cells.push(cell); cell = []; } else cell.push(it); });
+      if (cell.length) cells.push(cell);
+      for (let c of cells){
+        if (c.length === 1 && c[0].same) c = prevBar || [];
+        c = c.filter(it => !it.same);
+        if (!c.length) continue;
+        c.forEach(it => add(it, barQ / c.length));
+        prevBar = c;
+      }
+    } else {
+      ln.items.forEach(it => {
+        if (it.bar) return;
+        if (it.same){ if (prevChord) add(prevChord, per); return; }
+        add(it, per);
+      });
+    }
+  }
+  const capoM = text.match(/capo[^0-9\n]{0,15}(\d{1,2})/i);
+  const capo = capoM ? +capoM[1] : 0;
+  const shift = (+opt.transpose || 0) + (opt.useCapo ? capo : 0);
+  return { segs, sections, total: q, barQ, beatQ, bN, bD, capo, shift, chordCount: segs.filter(s => s.chord).length };
+}
+function chartToPiece(text, opt){
+  const C = buildChart(text, opt);
+  if (!C.segs.length) throw new Error('No chords were found. Paste lines that contain chord names such as G, Em7 or D/F#.');
+  const notes = [], chords = [];
+  const R = (midi, onset, dur) => notes.push({ midi, onset, dur, staffHand: 'R' });
+  const L = (midi, onset, dur) => notes.push({ midi, onset, dur, staffHand: 'L' });
+  let prev = null;
+  const MIXED = ['C','C\u266f','D','E\u266d','E','F','F\u266f','G','A\u266d','A','B\u266d','B'];
+  const nm = (pc, ch) => (/[#\u266f]/.test(ch.name || '') ? NAMES : ch.flat ? NAMES_FLAT : MIXED)[(pc + 120) % 12];
+  for (const s of C.segs){
+    if (!s.chord) continue;
+    const root = (s.chord.root + C.shift + 120) % 12;
+    const bassPc = s.chord.bass === null ? root : (s.chord.bass + C.shift + 120) % 12;
+    const V = voiceChord(root, chordIntervals(s.chord.q), prev); prev = V;
+    let B = 40 + ((bassPc - 40 % 12 + 12) % 12);
+    const beats = Math.max(1, Math.round(s.dur / C.beatQ));
+    s.chord.name = s.name;
+    chords.push({ q: s.q, name: nm(root, s.chord) + s.chord.q + (s.chord.bass === null ? '' : '/' + nm(bassPc, s.chord)) });
+    const each = (fn, from = 0) => { for (let b = from; b < beats; b++) fn(s.q + b * C.beatQ, Math.min(C.beatQ, s.dur - b * C.beatQ)); };
+    if (opt.style === 'held'){
+      L(B, s.q, s.dur); V.forEach(n => R(n, s.q, s.dur));
+    } else if (opt.style === 'arp'){
+      L(B, s.q, s.dur);
+      const seq = V.length > 2 ? [...V, ...V.slice(1, -1).reverse()] : V;
+      const step = C.beatQ / 2;
+      for (let i = 0, t = 0; t < s.dur - 1e-6; i++, t += step) R(seq[i % seq.length], s.q + t, Math.min(step, s.dur - t));
+    } else if (opt.style === 'oompah'){
+      const strong = C.bN === 4 ? [0, 2] : [0];
+      each((t, d) => { const b = Math.round((t - s.q) / C.beatQ) % C.bN; if (strong.includes(b)) L(b ? (B + 7 > 52 ? B - 5 : B + 7) : B, t, d); else V.forEach(n => R(n, t, d)); });
+    } else {
+      const half = Math.min(s.dur, beats >= 4 ? 2 * C.beatQ : s.dur);
+      L(B, s.q, half);
+      if (beats >= 4) L(B + 7 > 52 ? B - 5 : B + 7, s.q + 2 * C.beatQ, s.dur - 2 * C.beatQ);
+      each((t, d) => V.forEach(n => R(n, t, d)));
+    }
+  }
+  const nBars = Math.max(1, Math.ceil(C.total / C.barQ - 1e-6));
+  const measures = [];
+  for (let i = 0; i < nBars; i++) measures.push({ start: i * C.barQ, len: C.barQ, number: String(i + 1), beatLen: C.beatQ });
+  return { piece: { title: opt.title || 'Chord chart', composer: '', notes, measures, total: nBars * C.barQ, parts: 2,
+    tempo: clamp(+opt.tempo || 100, 30, 240), chords, edited: false }, info: C };
+}
+function chartOpts(){
+  return { time: $('chTime').value, len: $('chLen').value, style: $('chStyle').value, transpose: +$('chTrans').value,
+    useCapo: $('chCapo').checked, tempo: +$('chTempo').value, title: $('chTitle').value.trim() };
+}
+function chartPreview(){
+  const text = $('chText').value;
+  if (!text.trim()){ $('chInfo').textContent = 'Paste a chart to see what was found.'; $('chCapoLbl').textContent = 'Add the capo to the pitch (no capo found)'; return; }
+  if (/^\s*https?:\/\/\S+\s*$/.test(text)){ $('chInfo').textContent = 'That\u2019s a link. Klavar can\u2019t read web pages directly: open the page, select the chords and lyrics, copy them, and paste the text here.'; return; }
+  const C = buildChart(text, chartOpts());
+  $('chCapoLbl').textContent = C.capo ? `Add the capo to the pitch (capo ${C.capo} found)` : 'Add the capo to the pitch (no capo found)';
+  if (!C.chordCount){ $('chInfo').textContent = 'No chord lines found yet. Lines must contain only chord names (lyric lines are skipped).'; return; }
+  const secs = C.sections.filter(s => s.name).map(s => s.name + (s.times > 1 ? ` \u00d7${s.times}` : ''));
+  const bars = Math.ceil(C.total / C.barQ - 1e-6);
+  $('chInfo').textContent = `Found ${C.chordCount} chords, ${bars} bars${secs.length ? ' in ' + secs.join(', ') : ''}.` + (C.shift ? ` Shifted ${C.shift > 0 ? 'up' : 'down'} ${Math.abs(C.shift)} semitone${Math.abs(C.shift) === 1 ? '' : 's'}.` : '');
+}
+function openChordDialog(text){
+  if (typeof text === 'string') $('chText').value = text;
+  chartPreview();
+  if ($('chordDlg').showModal) $('chordDlg').showModal(); else $('chordDlg').setAttribute('open', '');
+}
+(() => {
+  const tr = $('chTrans');
+  for (let i = -6; i <= 6; i++){ const o = document.createElement('option'); o.value = i; o.textContent = i === 0 ? 'None' : (i > 0 ? '+' : '\u2212') + Math.abs(i) + ' semitone' + (Math.abs(i) === 1 ? '' : 's'); if (!i) o.selected = true; tr.appendChild(o); }
+})();
+['chText','chTime','chLen','chStyle','chTrans','chCapo'].forEach(id => $(id).addEventListener('input', chartPreview));
+$('chordBtn').addEventListener('click', () => openChordDialog());
+$('chCancel').addEventListener('click', () => $('chordDlg').close());
+$('chPaste').addEventListener('click', async () => {
+  try { const t = await navigator.clipboard.readText(); if (t){ $('chText').value = t; chartPreview(); } else toast('The clipboard is empty'); }
+  catch (e){ toast('Long-press the box and choose Paste instead'); }
+});
+$('chMake').addEventListener('click', () => {
+  try {
+    const { piece: p } = chartToPiece($('chText').value, chartOpts());
+    stop(); piece = p; resetEdits(); setTempo(); render(); resetScroll(); saveDoc();
+    $('chordDlg').close();
+    toast('Chord chart loaded');
+  } catch (e){ $('chInfo').textContent = e.message; }
+});
+
+/* ---------- Play along: wait for the player (MIDI keyboard or microphone) ---------- */
+function userHand(n){ const h = $('fHands').value; return h === 'both' || n.hand === h; }
+function beatAt(q){
+  const m = piece.measures.find(m => q < m.start + m.len - 1e-6) || piece.measures[piece.measures.length - 1];
+  return m ? m.beatLen : 1;
+}
+function followStatus(t){ $('fStatus').textContent = t; }
+function followBadge(t){ const b = $('fBadge'); b.textContent = t || ''; b.hidden = !t; }
+function followStart(q){
+  F.hold = null; followBadge('');
+  clearWant();
+  if (F.mode === 'off'){ F.events = []; return; }
+  const map = new Map();
+  curNotes.filter(userHand).forEach(n => {
+    const k = n.onset.toFixed(4);
+    if (!map.has(k)) map.set(k, { onset: n.onset, pitches: new Set(), hit: new Set(), done: false });
+    map.get(k).pitches.add(n.midi);
+  });
+  F.events = [...map.values()].sort((a, b) => a.onset - b.onset);
+  F.events.forEach(e => { if (e.onset < q - 1e-6) e.done = true; });
+  F.i = 0;
+  while (F.i < F.events.length && F.events[F.i].done) F.i++;
+}
+function clearWant(){ document.querySelectorAll('.lit-want').forEach(el => el.classList.remove('lit-want')); }
+function showWant(e){
+  clearWant();
+  e.pitches.forEach(m => { if (!e.hit.has(m)) document.querySelectorAll(`[data-k="${m}"]`).forEach(el => el.classList.add('lit-want')); });
+  followBadge('Waiting for ' + [...e.pitches].sort((a, b) => a - b).map(m => noteLabel(m, { labels: 'oct' })).join(' '));
+}
+function followTick(q){
+  if (F.mode === 'off' || !P.playing) return q;
+  if (F.hold) return F.hold.onset;
+  while (F.i < F.events.length && F.events[F.i].done) F.i++;
+  const e = F.events[F.i];
+  if (e && q >= e.onset + $('fTol').value * beatAt(e.onset)){
+    F.hold = e;
+    clearInterval(P.timer); P.timer = null; silence();
+    showWant(e);
+    return e.onset;
+  }
+  return q;
+}
+function followRelease(e){
+  F.hold = null; clearWant(); followBadge('');
+  rebase(e.onset);
+  clearInterval(P.timer); schedule(); P.timer = setInterval(schedule, 25);
+}
+function flashKey(m, cls, ms){
+  const els = document.querySelectorAll(`[data-k="${m}"]`);
+  els.forEach(el => { el.classList.remove('lit-ok', 'lit-bad'); el.classList.add(cls); });
+  if (ms) setTimeout(() => els.forEach(el => el.classList.remove(cls)), ms);
+}
+function userNoteOn(m, fromMic){
+  let ok = false;
+  if (F.mode !== 'off' && P.playing && F.events.length){
+    while (F.i < F.events.length && F.events[F.i].done) F.i++;
+    const e = F.events[F.i];
+    const q = F.hold ? F.hold.onset : currentQ();
+    if (e && q >= e.onset - $('fTol').value * beatAt(e.onset)){
+      const match = [...e.pitches].find(p => fromMic && !$('fOct').checked ? p % 12 === m % 12 : p === m);
+      if (match !== undefined){
+        ok = true;
+        e.hit.add(match);
+        if (fromMic || e.hit.size >= e.pitches.size){
+          e.done = true; F.i++;
+          if (F.hold === e) followRelease(e);
+        } else if (F.hold === e) showWant(e);
+      }
+    }
+  }
+  flashKey(m, ok || F.mode === 'off' || !P.playing ? 'lit-ok' : 'lit-bad', fromMic ? 260 : 0);
+}
+function userNoteOff(m){ document.querySelectorAll(`[data-k="${m}"]`).forEach(el => el.classList.remove('lit-ok', 'lit-bad')); }
+
+/* MIDI keyboards (Chrome and Edge on Android, Windows, Mac, ChromeOS) */
+let midiAccess = null;
+function onMidi(ev){
+  const [st, n, v] = ev.data, cmd = st & 0xf0;
+  if (cmd === 0x90 && v > 0) userNoteOn(n, false);
+  else if (cmd === 0x80 || (cmd === 0x90 && v === 0)) userNoteOff(n);
+}
+async function startMidi(){
+  if (!navigator.requestMIDIAccess){
+    followStatus('This browser can\u2019t connect to MIDI keyboards. Use Chrome on Android or a computer, or choose the microphone. (iPhone and iPad browsers don\u2019t support MIDI.)');
+    return false;
+  }
+  try { midiAccess = midiAccess || await navigator.requestMIDIAccess({ sysex: false }); }
+  catch (e){ followStatus('MIDI access was blocked. Allow MIDI for this site in the browser settings and try again.'); return false; }
+  const hook = () => {
+    const names = [];
+    midiAccess.inputs.forEach(inp => { inp.onmidimessage = onMidi; names.push(inp.name); });
+    followStatus(names.length ? 'Connected: ' + names.join(', ') + '. Press Play and start playing.' : 'No MIDI keyboard found yet. Connect it with a USB cable (USB TO HOST port, with a USB-C adapter for phones) and it will appear here.');
+  };
+  hook(); midiAccess.onstatechange = hook;
+  return true;
+}
+function stopMidi(){ if (midiAccess) midiAccess.inputs.forEach(inp => { inp.onmidimessage = null; }); }
+
+/* Microphone pitch detection (one note at a time) */
+const MIC = { stream: null, src: null, an: null, buf: null, timer: null, cand: -1, stable: 0, last: -1, prevRms: 0 };
+function detectPitch(buf, sr){
+  const N = buf.length >> 1, x = new Float32Array(N);
+  let rms = 0;
+  for (let i = 0; i < N; i++){ x[i] = (buf[2 * i] + buf[2 * i + 1]) * .5; rms += x[i] * x[i]; }
+  rms = Math.sqrt(rms / N);
+  if (rms < .008) return { rms };
+  const rate = sr / 2, minLag = Math.max(2, Math.floor(rate / 1400)), maxLag = Math.min(N >> 1, Math.floor(rate / 55));
+  const nsdf = new Float32Array(maxLag + 2);
+  for (let lag = minLag; lag <= maxLag + 1; lag++){
+    let acf = 0, m = 0;
+    for (let i = 0; i < N - lag; i++){ acf += x[i] * x[i + lag]; m += x[i] * x[i] + x[i + lag] * x[i + lag]; }
+    nsdf[lag] = m ? 2 * acf / m : 0;
+  }
+  let max = 0;
+  for (let l = minLag; l <= maxLag; l++) if (nsdf[l] > max) max = nsdf[l];
+  if (max < .6) return { rms };
+  let lag = -1;
+  for (let l = minLag + 1; l <= maxLag; l++){
+    if (nsdf[l] > nsdf[l - 1] && nsdf[l] >= nsdf[l + 1] && nsdf[l] >= .88 * max){ lag = l; break; }
+  }
+  if (lag < 0) return { rms };
+  const a = nsdf[lag - 1], b = nsdf[lag], c = nsdf[lag + 1], d = a - 2 * b + c;
+  const shift = d ? .5 * (a - c) / d : 0;
+  return { rms, f: rate / (lag + shift), clarity: b };
+}
+function micTick(){
+  MIC.an.getFloatTimeDomainData(MIC.buf);
+  const p = detectPitch(MIC.buf, actx.sampleRate);
+  const attack = p.rms > MIC.prevRms * 1.6 && p.rms > .02;
+  MIC.prevRms = p.rms;
+  if (!p.f || p.clarity < .8){ MIC.stable = 0; if (p.rms < .008) MIC.last = -1; return; }
+  const m = Math.round(69 + 12 * Math.log2(p.f / 440));
+  if (m === MIC.cand) MIC.stable++; else { MIC.cand = m; MIC.stable = 1; }
+  if (MIC.stable === 2 && (m !== MIC.last || attack)){ MIC.last = m; userNoteOn(m, true); }
+  else if (MIC.stable > 2 && attack && m === MIC.last){ userNoteOn(m, true); }
+}
+async function startMic(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ followStatus('This browser can\u2019t use the microphone here. Try the installed app or the GitHub Pages version.'); return false; }
+  try {
+    audio();
+    MIC.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch (e){ followStatus('Microphone access was blocked. Allow the microphone for Klavar and try again.'); return false; }
+  MIC.src = actx.createMediaStreamSource(MIC.stream);
+  MIC.an = actx.createAnalyser(); MIC.an.fftSize = 2048;
+  MIC.src.connect(MIC.an);
+  MIC.buf = new Float32Array(MIC.an.fftSize);
+  MIC.timer = setInterval(micTick, 30);
+  followStatus('Listening. Press Play and start playing. The microphone hears one note at a time, so for chords any one correct note counts. Headphones keep Klavar\u2019s own sound out of the microphone.');
+  return true;
+}
+function stopMic(){
+  clearInterval(MIC.timer); MIC.timer = null;
+  if (MIC.stream) MIC.stream.getTracks().forEach(t => t.stop());
+  if (MIC.src) MIC.src.disconnect();
+  MIC.stream = MIC.src = null;
+}
+async function setFollowMode(mode){
+  stopMidi(); stopMic();
+  F.mode = mode;
+  $('fOctRow').hidden = mode !== 'mic';
+  if (mode === 'midi'){ if (!await startMidi()) { F.mode = 'off'; $('fMode').value = 'off'; } }
+  else if (mode === 'mic'){
+    $('fAccomp').checked = false;
+    if (!await startMic()) { F.mode = 'off'; $('fMode').value = 'off'; }
+  } else followStatus('Choose MIDI keyboard or microphone, then press Play. Klavar waits for you at each note.');
+  if (P.playing){ const q = F.hold ? F.hold.onset : currentQ(); silence(); rebase(q); followStart(q); clearInterval(P.timer); P.timer = setInterval(schedule, 25); }
+  else followStart(P.pos);
+}
+$('fMode').addEventListener('change', e => setFollowMode(e.target.value));
+['fHands', 'fAccomp'].forEach(id => $(id).addEventListener('change', () => {
+  if (P.playing){ const q = F.hold ? F.hold.onset : currentQ(); silence(); rebase(q); followStart(q); clearInterval(P.timer); P.timer = setInterval(schedule, 25); }
+}));
 
 $('print').addEventListener('click', () => window.print());
 $('sample').addEventListener('click', () => { try { stop(); piece = parseMusicXML(buildSample()); resetEdits(); setTempo(); render(); resetScroll(); } catch (e){ showError(e); } });

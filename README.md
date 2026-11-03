@@ -227,6 +227,46 @@ Workflow files (in `.github/workflows`) can't be changed this way, because GitHu
 automated jobs edit workflows. Upload those by hand: open the `.github/workflows` folder on
 github.com, then **Add file > Upload files**; a file with the same name replaces the old one.
 
+## 10. The web app on GitHub Pages
+
+Every release also publishes Klavar to `https://<your-user>.github.io/<repo-name>/`.
+One-time setup: on github.com open the repo's **Settings > Pages**, and under
+**Build and deployment > Source** choose **GitHub Actions**.
+
+- **iPhone:** open the address in Safari, tap **Share > Add to Home Screen**. It gets its own
+  icon, opens full screen and works offline.
+- **Android (Chrome):** open the address, then **Add to Home screen** or **Install app**.
+  Once installed, Klavar appears in Android's **Share** menu, so a MusicXML or MuseScore file
+  can be sent straight to it from Files, Drive, Gmail or a browser download.
+- New releases show a **Reload** bar the next time the app is opened.
+- Photo scanning works here too, as long as the scan server address is `https://`
+  (a Codespace's forwarded port is).
+
+## 11. Chord charts
+
+**Import a chord chart** (top of the panel) turns a chords-over-lyrics chart into a playable
+accompaniment. Paste the chart, or on Android with the installed web app, select the text on a
+chord site and use **Share > Klavar**. Lyric lines are skipped; `[Verse]`-style headers, `|` bar
+lines, `%` and `x2` repeats, slash chords and a "Capo N" note are understood. Choose the time
+signature, tempo, chord length, accompaniment style and transposition, then **Create score**.
+Klavar can't fetch pages from chord sites itself: copy the text from the page instead.
+
+## 12. Play along (MIDI keyboard or microphone)
+
+Under **Play along**, choose what Klavar listens to, then press Play. The music moves at the
+tempo you set; if you haven't played the next note by the end of the timing window
+(¼ beat by default), it stops and waits, showing the keys it needs. Playing the right notes
+(up to the timing window early) lets it carry on. Wrong notes are ignored.
+**You play** picks your hand(s); **Play the other hand for me** accompanies you.
+
+- **MIDI keyboard:** connect the keyboard's USB TO HOST port to the phone with a USB cable and a
+  USB-C (OTG) adapter. Works in Chrome on Android, in the Android app, and in Chrome or Edge on
+  computers. iPhone and iPad browsers don't support MIDI. Bluetooth MIDI on Android needs the
+  adapter to be connected through a Bluetooth MIDI app first.
+- **Microphone:** works everywhere, including iPhone and iPad. It hears one note at a time, so
+  for chords any one correct note counts, and by default any octave counts. Use headphones if
+  Klavar is playing the other hand, so its sound doesn't reach the microphone.
+
 ## Licenses of included parts
 
 Capacitor (MIT), Capgo capacitor-updater (MPL-2.0), keep-awake (MIT), OpenSheetMusicDisplay (BSD-3-Clause), JSZip (MIT), oemer (MIT),
