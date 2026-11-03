@@ -1,7 +1,7 @@
 name: Build and publish Klavar
 
 # On every push to main (or on demand): builds the Android app and the iOS app in
-# parallel, then publishes one release with the APK, the iOS app, the web bundle for
+# parallel, deploys the web version to GitHub Pages, then publishes one release with the APK, the iOS app, the web bundle for
 # over-the-air updates, and version.json, which installed apps check for updates.
 on:
   push:
@@ -128,6 +128,31 @@ jobs:
         with:
           name: ios
           path: dist/
+
+  pages:
+    # Publishes the installable web version to GitHub Pages (iPhone and any browser).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the site
+        run: |
+          cp -R www site
+          echo "window.KLAVAR_BUILD = { web: ${WEB_BUILD}, native: 0, feed: '' };" > site/build-info.js
+          sed -i "s/__BUILD__/${WEB_BUILD}/" site/sw.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
 
   publish:
     needs: [android, ios]
