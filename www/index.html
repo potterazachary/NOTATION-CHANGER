@@ -97,7 +97,7 @@ button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .legend svg{display:block}
 .help{font-size:13px;color:var(--muted);border-top:1px solid var(--rule);padding-top:16px}
 .help p{margin:0 0 8px}
-main{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;overflow:hidden}
+main{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;overflow:hidden;position:relative}
 .bar{display:flex;align-items:center;gap:16px;padding:18px 28px 12px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
 .bar h2{font:400 26px/1.1 "Instrument Serif",Georgia,serif;margin:0}
 .bar .meta{color:var(--muted);font-size:13px}
@@ -139,6 +139,12 @@ input[type=range]:disabled{opacity:.4}
 [data-k].lit-want{fill:var(--ph)}
 [data-k].lit-ok{fill:#2BB673}
 [data-k].lit-bad{fill:#E5484D}
+.waitbar{position:absolute;left:50%;transform:translateX(-50%);z-index:5;background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:12px;font-size:18px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.3);white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.waitbar .ok{color:#5FD39A;font-weight:500}
+.want-note{stroke:var(--ph)!important;stroke-width:4px!important;animation:wantpulse .9s ease-in-out infinite}
+.hit-note{stroke:#2BB673!important;stroke-width:4px!important}
+@keyframes wantpulse{50%{stroke-opacity:.25}}
+@media (prefers-reduced-motion:reduce){.want-note{animation:none}}
 @media print{
   aside,.kbd,.transport,#toggleSide,.splitter,.toast{display:none}
   .app{display:block}
@@ -360,6 +366,7 @@ input[type=range]:disabled{opacity:.4}
         <span class="fbadge" id="fBadge" hidden></span>
       </div>
     </div>
+    <div class="waitbar" id="waitBar" hidden role="status" aria-live="polite"></div>
     <div class="scroller" id="scroller">
       <div class="kbd" id="kbd"></div>
       <div class="score" id="score"><div class="msg">Open a MusicXML file to see it in Klavarskribo.</div></div>
@@ -667,8 +674,8 @@ function renderView(){
   notes.forEach((n, i) => {
     const black = BLACK.has(n.midi % 12), c = handColor(n.hand);
     out.push(black
-      ? `<circle data-i="${i}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r}" fill="${c}"/>`
-      : `<circle data-i="${i}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r - .7}" fill="var(--paper)" stroke="${c}" stroke-width="1.6"/>`);
+      ? `<circle data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r}" fill="${c}"/>`
+      : `<circle data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r - .7}" fill="var(--paper)" stroke="${c}" stroke-width="1.6"/>`);
     if (n.src === selNote) out.push(`<circle cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r + 4}" fill="none" stroke="var(--ph)" stroke-width="2"/>`);
   });
 
@@ -682,7 +689,7 @@ function renderView(){
   }
   if (s.chords) piece.chords.forEach(c => out.push(`<text x="${x1 + 8}" y="${y(c.q) + 4}" font-size="12" font-weight="600" fill="var(--ink)">${c.name}</text>`));
   $('score').innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Instrument Sans, system-ui, sans-serif" role="img" aria-label="Klavarskribo score">${out.join('')}<line id="playhead" x1="${x0}" x2="${x1}" y1="0" y2="0" stroke="var(--ph)" stroke-width="2.5" visibility="hidden"/></svg>`;
-  geom = { horiz: true, anchor: 'top', at: q => y(q), inv: v => (v - top) / s.ppq, follow: .35, point: true,
+  geom = { horiz: true, anchor: 'top', lead: r + (s.labels !== 'off' ? 30 : 16), at: q => y(q), inv: v => (v - top) / s.ppq, follow: .35, point: true,
     toQP: (px, py) => ({ q: (py - top) / s.ppq, m: lo + Math.floor((px - left) / s.sw) }),
     pos: n => ({ x: x(n.midi), y: y(n.onset) }) };
 
@@ -738,7 +745,7 @@ function renderRoll(s, notes, lo, hi){
   out.push(`<line x1="${xOf(piece.total)}" y1="${y0}" x2="${xOf(piece.total)}" y2="${y1}" stroke="var(--ink)" stroke-width="3"/>`);
   notes.forEach((n, i) => {
     const w = Math.max(3, n.dur * s.ppq - 2);
-    out.push(`<rect data-i="${i}" x="${xOf(n.onset) + 1}" y="${yOf(n.midi) + 1}" width="${w}" height="${rh - 2}" rx="2.5" fill="${handColor(n.hand)}" stroke="${n.src === selNote ? 'var(--ph)' : 'none'}" stroke-width="2.5"/>`);
+    out.push(`<rect data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" x="${xOf(n.onset) + 1}" y="${yOf(n.midi) + 1}" width="${w}" height="${rh - 2}" rx="2.5" fill="${handColor(n.hand)}" stroke="${n.src === selNote ? 'var(--ph)' : 'none'}" stroke-width="2.5"/>`);
   });
   outNotes.forEach(n => {
     const xx = xOf(n.onset) + 4, below = n.midi < lo, yy = below ? top + rows * rh - 1 : top + 1, d = below ? -7 : 7;
@@ -991,7 +998,7 @@ function renderFalling(s, notes, lo, hi){
     const black = BLACK.has(n.midi % 12);
     const w = black ? s.sw * 0.7 : s.sw - 2, off = (s.sw - w) / 2;
     const h = Math.max(3, n.dur * s.ppq - 2), yy = yT(n.onset + n.dur) + 1;
-    out.push(`<rect data-i="${i}" stroke="${n.src === selNote ? 'var(--ph)' : 'none'}" stroke-width="2.5" x="${x(n.midi) + off}" y="${yy}" width="${w}" height="${h}" rx="${Math.min(4, w / 2)}" fill="${handColor(n.hand)}" fill-opacity="${black ? .78 : 1}"/>`);
+    out.push(`<rect data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" stroke="${n.src === selNote ? 'var(--ph)' : 'none'}" stroke-width="2.5" x="${x(n.midi) + off}" y="${yy}" width="${w}" height="${h}" rx="${Math.min(4, w / 2)}" fill="${handColor(n.hand)}" fill-opacity="${black ? .78 : 1}"/>`);
     if (s.labels !== 'off' && s.sw >= 10 && h >= 14)
       out.push(`<text x="${x(n.midi) + s.sw / 2}" y="${yy + h - 5}" text-anchor="middle" font-size="${clamp(s.sw * .62, 7, 11)}" font-weight="600" fill="var(--paper)">${noteLabel(n.midi, s)}</text>`);
   });
@@ -1058,7 +1065,7 @@ function renderStaff(s, notes){
       if (xe > cx + hs * 1.4) out.push(`<line x1="${cx + hs * 1.3}" y1="${cy}" x2="${xe}" y2="${cy}" stroke="${c}" stroke-width="${Math.max(2, hs * .7)}" stroke-opacity=".3" stroke-linecap="round"/>`);
     }
     const open = n.dur >= 2;
-    heads.push(`<ellipse opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * 1.25}" ry="${hs * .85}" transform="rotate(-20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
+    heads.push(`<ellipse data-n="${n.onset.toFixed(4)}|${n.midi}" opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * 1.25}" ry="${hs * .85}" transform="rotate(-20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
     if (s.labels !== 'off') heads.push(`<text x="${cx}" y="${cy - hs * 1.5}" text-anchor="middle" font-size="${clamp(hs * 1.5, 7, 12)}" font-weight="600" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${noteLabel(n.midi, s)}</text>`);
     if (SHARP[n.midi % 12]) heads.push(`<text x="${cx - hs * 2.7}" y="${cy + hs * .9}" font-size="${hs * 2.6}" fill="${c}" text-anchor="middle">♯</text>`);
   });
@@ -1162,7 +1169,7 @@ async function renderSheet(s, rot){
   $('score').innerHTML = '';
   $('score').appendChild(wrap);
   geom = rot
-    ? { horiz: true, anchor: 'top', at: xAt, inv: qAt, follow: .35 }
+    ? { horiz: true, anchor: 'top', lead: 40, at: xAt, inv: qAt, follow: .35 }
     : { horiz: false, anchor: 'left', inset: 90, at: xAt, inv: qAt, follow: .3 };
   setMeta();
   afterRender();
@@ -1208,7 +1215,7 @@ function renderStaffV(s, notes){
       if (ye > cy + hs * .8) out.push(`<line x1="${cx}" y1="${cy + hs * .7}" x2="${cx}" y2="${ye}" stroke="${c}" stroke-width="${Math.max(2, hs * .45)}" stroke-opacity=".3" stroke-linecap="round"/>`);
     }
     const open = n.dur >= 2;
-    heads.push(`<ellipse opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * .5}" ry="${hs * .68}" transform="rotate(20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
+    heads.push(`<ellipse data-n="${n.onset.toFixed(4)}|${n.midi}" opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * .5}" ry="${hs * .68}" transform="rotate(20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
     if (SHARP[n.midi % 12]) heads.push(`<text x="${cx}" y="${cy - hs * .95}" font-size="${hs * 1.3}" fill="${c}" text-anchor="middle">\u266f</text>`);
     if (s.labels !== 'off') heads.push(`<text x="${cx + hs * .75}" y="${cy + 4}" font-size="${clamp(hs * 1.4, 7, 12)}" font-weight="600" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${noteLabel(n.midi, s)}</text>`);
   });
@@ -1471,7 +1478,7 @@ function drawPlay(q, follow){
     const svg = $('score').querySelector('svg');
     if ($('scrollMode').checked && geom.anchor && svg){
       const sc = $('scroller'), sr = svg.getBoundingClientRect(), cr = sc.getBoundingClientRect();
-      if (geom.anchor === 'top') sc.scrollTop = sr.top - cr.top + sc.scrollTop + c - $('kbd').offsetHeight;
+      if (geom.anchor === 'top') sc.scrollTop = sr.top - cr.top + sc.scrollTop + c - $('kbd').offsetHeight - (geom.lead || 0);
       else if (geom.anchor === 'bottom') sc.scrollTop = sr.top - cr.top + sc.scrollTop + c - sc.clientHeight + $('kbdb').offsetHeight;
       else sc.scrollLeft = sr.left - cr.left + sc.scrollLeft + c - geom.inset;
     } else if (follow){
@@ -1497,6 +1504,7 @@ function afterRender(){
   $('sw').disabled = $('fit').checked && $('view').value !== 'jianpu';
   $('shift').disabled = $('oor').disabled = $('keys').value === 'auto';
   updateEditPanel();
+  if (typeof F !== 'undefined' && F.hold) showWant(F.hold);
   P.lit = new Map();
   const q = currentQ();
   if (P.playing || q > 0) drawPlay(q);
@@ -2258,11 +2266,25 @@ function followStart(q){
   F.i = 0;
   while (F.i < F.events.length && F.events[F.i].done) F.i++;
 }
-function clearWant(){ document.querySelectorAll('.lit-want').forEach(el => el.classList.remove('lit-want')); }
+function clearWant(){
+  document.querySelectorAll('.lit-want').forEach(el => el.classList.remove('lit-want'));
+  document.querySelectorAll('.want-note,.hit-note').forEach(el => el.classList.remove('want-note', 'hit-note'));
+  $('waitBar').hidden = true;
+}
 function showWant(e){
   clearWant();
   e.pitches.forEach(m => { if (!e.hit.has(m)) document.querySelectorAll(`[data-k="${m}"]`).forEach(el => el.classList.add('lit-want')); });
-  followBadge('Waiting for ' + [...e.pitches].sort((a, b) => a - b).map(m => noteLabel(m, { labels: 'oct' })).join(' '));
+  const k = e.onset.toFixed(4);
+  e.pitches.forEach(m => document.querySelectorAll(`[data-n="${k}|${m}"]`).forEach(el => el.classList.add(e.hit.has(m) ? 'hit-note' : 'want-note')));
+  const sorted = [...e.pitches].sort((a, b) => a - b);
+  followBadge('Waiting for ' + sorted.map(m => noteLabel(m, { labels: 'oct' })).join(' '));
+  const wb = $('waitBar');
+  wb.innerHTML = 'Play ' + sorted.map(m => e.hit.has(m) ? `<span class="ok">\u2713${noteLabel(m, { labels: 'oct' })}</span>` : noteLabel(m, { labels: 'oct' })).join(' ');
+  // Keep the banner away from the line where the waiting notes are.
+  Object.assign(wb.style, { top: '', bottom: '', left: '', right: '', transform: '' });
+  if (geom && geom.anchor === 'top') Object.assign(wb.style, { bottom: (16 + $('kbdb').offsetHeight) + 'px' });
+  else Object.assign(wb.style, { top: ($('scroller').offsetTop + $('kbd').offsetHeight + 10) + 'px', left: 'auto', right: '16px', transform: 'none' });
+  wb.hidden = false;
 }
 function followTick(q){
   if (F.mode === 'off' || !P.playing) return q;
