@@ -1895,7 +1895,7 @@ $('scanPick').addEventListener('click', () => $('scanPickFile').click());
 /* ---------- Over-the-air updates (no app store) ---------- */
 const UPD = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.CapacitorUpdater;
 const BUILD = window.KLAVAR_BUILD || { web: 0, native: 1, feed: '' };
-let lastCheck = 0, readyBundle = null;
+let lastCheck = 0, readyBundle = null, updBusy = false;
 function showUpdBar(text, label, fn){
   $('updText').textContent = text; $('updBtn').textContent = label;
   $('updBtn').onclick = fn; $('updBar').hidden = false;
@@ -1922,13 +1922,38 @@ async function checkForUpdates(manual){
     return;
   }
   if ((feed.web | 0) > (BUILD.web | 0)){
-    if (readyBundle && readyBundle.version === String(feed.web)) return;
+    const ver = String(feed.web);
+    if (readyBundle && readyBundle.version === ver){
+      if (manual) showUpdBar(`Update ${ver} downloaded.`, 'Restart now', () => UPD.set({ id: readyBundle.id }));
+      return;
+    }
+    if (updBusy){ if (manual) toast('Already downloading the update\u2026'); return; }
+    updBusy = true;
     try {
-      const b = await UPD.download({ url: feed.bundle, version: String(feed.web) });
+      // Reuse a copy downloaded earlier (for example before the app was closed).
+      let b = null;
+      try {
+        const list = await UPD.list();
+        b = ((list && list.bundles) || []).find(x => x.version === ver && (x.status === 'success' || x.status === 'pending')) || null;
+        const broken = ((list && list.bundles) || []).filter(x => x.version === ver && x.status === 'error');
+        for (const x of broken){ try { await UPD.delete({ id: x.id }); } catch (e) {} }
+      } catch (e) {}
+      if (!b){
+        let lastErr;
+        for (let attempt = 0; attempt < 3 && !b; attempt++){
+          if (attempt) await new Promise(r => setTimeout(r, 4000 * attempt));
+          try { b = await UPD.download({ url: feed.bundle, version: ver }); } catch (e){ lastErr = e; }
+        }
+        if (!b) throw lastErr || new Error('download failed');
+      }
       await UPD.next({ id: b.id });
       readyBundle = b;
-      showUpdBar(`Update ${feed.web} downloaded.`, 'Restart now', () => UPD.set({ id: b.id }));
-    } catch (e){ if (manual) toast('The update could not be downloaded'); }
+      showUpdBar(`Update ${ver} downloaded.`, 'Restart now', () => UPD.set({ id: b.id }));
+    } catch (e){
+      lastCheck = 0;
+      if (manual) toast(navigator.onLine === false ? 'You\u2019re offline. Klavar will try again later.' : 'The update isn\u2019t ready yet (it may still be publishing). Klavar will try again shortly.');
+      setTimeout(() => checkForUpdates(false), 2 * 60 * 1000);
+    } finally { updBusy = false; }
     return;
   }
   if (manual) toast('Klavar is up to date');
