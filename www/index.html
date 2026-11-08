@@ -422,11 +422,23 @@ function parseMusicXML(text){
   const parts = kids(root, 'part');
   if (!parts.length) throw new Error('The score has no parts.');
 
-  const notes = [], measures = [];
+  const notes = [], measures = [], R = [];
   parts.forEach((part, pi) => {
-    let divisions = 1, t = 0, beats = 4, beatType = 4, multiStaff = false;
+    let divisions = 1, t = 0, beats = 4, beatType = 4, multiStaff = false, mi = -1, openEnding = null;
     const pending = new Map();
     for (const m of kids(part, 'measure')){
+      mi++;
+      if (pi === 0) kids(m, 'barline').forEach(bl => {
+        const r = R[mi] || (R[mi] = {});
+        const rep = bl.querySelector('repeat');
+        if (rep){ if (rep.getAttribute('direction') === 'forward') r.start = true; else r.end = Math.max(2, parseInt(rep.getAttribute('times')) || 2); }
+        const en = bl.querySelector('ending');
+        if (en){
+          const type = en.getAttribute('type');
+          if (type === 'start') openEnding = { from: mi, nums: endingNums(en.getAttribute('number')) };
+          if ((type === 'stop' || type === 'discontinue') && openEnding){ markEnding(R, openEnding.from, mi, openEnding.nums); openEnding = null; }
+        }
+      });
       const mStart = t; let pos = 0, maxPos = 0, lastOnset = 0;
       for (const el of m.children){
         const tag = el.tagName;
@@ -477,8 +489,52 @@ function parseMusicXML(text){
   const total = Math.max(...measures.map(m => m.start + m.len), ...notes.map(n => n.onset + n.dur));
   const snd = doc.querySelector('sound[tempo]'), pm = doc.querySelector('metronome per-minute');
   const tempo = snd ? parseFloat(snd.getAttribute('tempo')) : pm ? parseFloat(pm.textContent) : 100;
-  return { title, composer, notes, measures, total, parts: parts.length, tempo: tempo > 0 && tempo < 400 ? tempo : 100 };
+  return expandRepeats({ title, composer, notes, measures, total, parts: parts.length, tempo: tempo > 0 && tempo < 400 ? tempo : 100 }, R);
 }
+
+/* ---------- Repeats and 1st/2nd endings ---------- */
+// R[i] describes measure i: start (forward repeat), end (times the section is played),
+// endings (which passes play this measure) and voltaEnd (last measure of that ending).
+function repeatOrder(R, n){
+  const order = [];
+  let i = 0, secStart = 0, pass = 1, guard = 0;
+  while (i < n && guard++ < 20000){
+    const m = R[i] || {};
+    if (m.start && i !== secStart){ secStart = i; pass = 1; }
+    if (m.endings && !m.endings.includes(pass)){ i = (m.voltaEnd !== undefined ? m.voltaEnd : i) + 1; continue; }
+    order.push(i);
+    if (m.end && pass < m.end){ pass++; i = secStart; continue; }
+    if (m.end || (m.endings && m.voltaEnd === i)){ secStart = i + 1; pass = 1; }
+    i++;
+  }
+  return order;
+}
+function expandRepeats(p, R){
+  if (!R || !R.some(r => r && (r.start || r.end || r.endings))) return p;
+  const order = repeatOrder(R, p.measures.length);
+  if (order.length === p.measures.length && order.every((v, i) => v === i)) return p;
+  const byM = p.measures.map(() => []);
+  p.notes.forEach(n => {
+    let i = p.measures.findIndex(m => n.onset < m.start + m.len - 1e-6);
+    if (i < 0) i = p.measures.length - 1;
+    byM[i].push(n);
+  });
+  const notes = [], measures = [];
+  let t = 0;
+  order.forEach(i => {
+    const m = p.measures[i];
+    byM[i].forEach(n => notes.push({ ...n, onset: t + (n.onset - m.start) }));
+    measures.push({ ...m, start: t });
+    t += m.len;
+  });
+  let total = t;
+  notes.forEach(n => { total = Math.max(total, n.onset + n.dur); });
+  return { ...p, notes, measures, total };
+}
+function markEnding(R, from, to, nums){
+  for (let k = from; k <= to; k++){ const r = R[k] || (R[k] = {}); r.endings = nums; r.voltaEnd = to; }
+}
+const endingNums = s => (String(s || '1').match(/\d+/g) || ['1']).map(Number);
 
 function parseScore(text){
   return /<museScore[\s>]/.test(text.slice(0, 3000)) ? parseMSCX(text) : parseMusicXML(text);
@@ -502,6 +558,21 @@ function parseMSCX(text){
   const hand = {};
   (multi || parts.flat()).forEach((id, i) => { hand[id] = i ? 'L' : 'R'; });
   const staffs = kids(sc, 'Staff').filter(s => hand[s.getAttribute('id')] && kids(s, 'Measure').length);
+  const R = [];
+  kids(sc, 'Staff').forEach(st => kids(st, 'Measure').forEach((m, mi) => {
+    const r = R[mi] || (R[mi] = {});
+    if (kids(m, 'startRepeat').length) r.start = true;
+    const er = kids(m, 'endRepeat')[0];
+    if (er) r.end = Math.max(2, parseInt(er.textContent) || 2);
+    m.querySelectorAll('Spanner[type="Volta"]').forEach(sp => {
+      const v = sp.querySelector(':scope > Volta');
+      if (!v) return;
+      const nums = endingNums((v.querySelector('endings') || v.querySelector('text') || {}).textContent);
+      const lenEl = sp.querySelector(':scope > next > location > measures');
+      const len = lenEl ? Math.max(1, parseInt(lenEl.textContent) || 1) : 1;
+      markEnding(R, mi, mi + len - 1, nums);
+    });
+  }));
   if (!staffs.length) throw new Error('No music staves were found in this MuseScore file.');
   const notes = [], measures = [];
   let tempo = 0;
@@ -559,7 +630,7 @@ function parseMSCX(text){
   let total = 0;
   measures.forEach(m => { total = Math.max(total, m.start + m.len); });
   notes.forEach(n => { total = Math.max(total, n.onset + n.dur); });
-  return { title, composer, notes, measures, total, parts: staffs.length, tempo: tempo > 0 && tempo < 400 ? tempo : 100 };
+  return expandRepeats({ title, composer, notes, measures, total, parts: staffs.length, tempo: tempo > 0 && tempo < 400 ? tempo : 100 }, R);
 }
 
 async function readFile(file){
