@@ -267,6 +267,16 @@ tempo you set; if you haven't played the next note by the end of the timing wind
   for chords any one correct note counts, and by default any octave counts. Use headphones if
   Klavar is playing the other hand, so its sound doesn't reach the microphone.
 
+## 13. Fingering
+
+Tick **Show suggested fingering** to see finger numbers (1 thumb to 5 pinky) on the music in
+Klavarskribo, piano roll, falling notes, both staff views and the engraved sheet music. Klavar
+works them out per hand from standard comfort rules (finger spans, thumb under, thumb off black
+keys, chord shapes) and keeps any fingering written in the score file. In edit mode, select a
+note and type 1-5 to set its finger (0 clears it). **Fingering guide** explains the common
+patterns, with keyboard diagrams and examples you can load and play. Exported MusicXML includes
+the fingering.
+
 ## Licenses of included parts
 
 Capacitor (MIT), Capgo capacitor-updater (MPL-2.0), keep-awake (MIT), OpenSheetMusicDisplay (BSD-3-Clause), JSZip (MIT), oemer (MIT),

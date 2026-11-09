@@ -145,6 +145,11 @@ input[type=range]:disabled{opacity:.4}
 .hit-note{stroke:#2BB673!important;stroke-width:4px!important}
 @keyframes wantpulse{50%{stroke-opacity:.25}}
 @media (prefers-reduced-motion:reduce){.want-note{animation:none}}
+.fgdlg{width:min(780px,calc(100vw - 24px))}
+.fgex{border-top:1px solid var(--rule);padding:12px 0}
+.fgex h4{margin:0 0 4px;font-size:16px}
+.fgdia{overflow-x:auto;margin:8px 0}
+.fgdia svg{display:block}
 @media print{
   aside,.kbd,.transport,#toggleSide,.splitter,.toast{display:none}
   .app{display:block}
@@ -184,7 +189,7 @@ input[type=range]:disabled{opacity:.4}
 
     <fieldset id="editPanel" hidden>
       <legend>Edit notes</legend>
-      <p class="hint">Click an empty spot to add a note, or drag a note to move it. With a note selected: ↑ ↓ change pitch (Shift for an octave), ← → move in time, [ and ] change length, H switches hand, Delete removes it. Ctrl+Z undoes.</p>
+      <p class="hint">Click an empty spot to add a note, or drag a note to move it. With a note selected: ↑ ↓ change pitch (Shift for an octave), ← → move in time, [ and ] change length, H switches hand, 1–5 set the finger (0 clears it), Delete removes it. Ctrl+Z undoes.</p>
       <div class="selinfo" id="selInfo">No note selected.</div>
       <label class="row">Length (selected and new notes)
         <select id="elen">
@@ -311,6 +316,8 @@ input[type=range]:disabled{opacity:.4}
           <option value="oct">Note names with octave (C4, F♯5)</option>
         </select></label>
       <label class="check"><input type="checkbox" id="chords"> Show likely chords</label>
+      <label class="check"><input type="checkbox" id="fingers"> Show suggested fingering</label>
+      <button class="chordbtn" id="fgGuide">✋ Fingering guide</button>
       <label class="row">Numbered notation key (1 =)
         <select id="jkey">
           <option value="auto">Detect automatically</option>
@@ -375,6 +382,13 @@ input[type=range]:disabled{opacity:.4}
   </main>
 </div>
 
+<dialog class="dlg fgdlg" id="fgDlg" aria-labelledby="fgHead">
+  <h3 id="fgHead">Fingering guide</h3>
+  <p class="hint">Finger numbers are the same for both hands: 1 thumb, 2 index, 3 middle, 4 ring, 5 pinky. Turn on <b>Show suggested fingering</b> to see numbers on the music. Klavar works them out from the patterns below and keeps any fingering already written in your score. Treat them as a starting point: hands differ, and a teacher's fingering always wins.</p>
+  <div id="fgList"></div>
+  <section class="fgex"><h4>General tips</h4><p class="hint">Keep the thumb on white keys where you can. Going up with the right hand (or down with the left), tuck the thumb under after finger 3 or 4; coming back, cross 3 or 4 over the thumb. Move the hand during rests and long notes rather than in the middle of a fast run. When a shape comes back, use the same fingers again so the hand learns it.</p></section>
+  <div class="btns"><button class="primary" id="fgClose">Close</button></div>
+</dialog>
 <dialog class="dlg" id="chordDlg" aria-labelledby="chHead">
   <h3 id="chHead">Import a chord chart</h3>
   <p class="hint">Paste chords from a chord website, or type your own. Lyric lines are skipped. Use | for bar lines, [Verse] or [Chorus] for sections, x2 to repeat a line or section, and % to repeat the previous bar.</p>
@@ -471,6 +485,8 @@ function parseMusicXML(text){
               if (!ties.includes('start')) pending.delete(key);
             } else {
               const n = { midi, onset: mStart + onset, dur, staffHand };
+              const fgEl = el.querySelector('technical > fingering');
+              if (fgEl && /^[1-5]$/.test(fgEl.textContent.trim())) n.finger = +fgEl.textContent.trim();
               notes.push(n);
               if (ties.includes('start')) pending.set(key, n);
             }
@@ -614,6 +630,8 @@ function parseMSCX(text){
               if (p && Math.abs(p.onset + p.dur - onset) < 1e-4){ p.dur += d; if (!tStart) pending.delete(key); }
               else {
                 const n = { midi, onset, dur: d, staffHand: h };
+                const fgEl = nEl.querySelector(':scope > Fingering > text');
+                if (fgEl && /^[1-5]$/.test(fgEl.textContent.trim())) n.finger = +fgEl.textContent.trim();
                 notes.push(n);
                 if (tStart) pending.set(key, n); else pending.delete(key);
               }
@@ -654,7 +672,7 @@ async function readFile(file){
 
 /* ---------- Rendering ---------- */
 function settings(){
-  return { view: $('view').value, fit: $('fit').checked, keys: $('keys').value, shift: +$('shift').value, oor: $('oor').value, labels: $('labels').value, jkey: $('jkey').value, scroll: $('scrollMode').checked, chords: $('chords').checked, kbd: +$('kbsize').value, ppq: +$('ppq').value, sw: +$('sw').value, hands: $('hands').value,
+  return { view: $('view').value, fit: $('fit').checked, keys: $('keys').value, shift: +$('shift').value, oor: $('oor').value, labels: $('labels').value, fingers: $('fingers').checked, jkey: $('jkey').value, scroll: $('scrollMode').checked, chords: $('chords').checked, kbd: +$('kbsize').value, ppq: +$('ppq').value, sw: +$('sw').value, hands: $('hands').value,
            dur: $('dur').checked, beats: $('beats').checked, color: $('color').checked };
 }
 
@@ -682,6 +700,7 @@ function renderView(){
   }
   const notes = all.filter(n => !n.out);
   outNotes = all.filter(n => n.out); piece.outCount = outNotes.length;
+  if (s.fingers){ const fm = suggestFingering(notes); all.forEach(n => { n.fg = fm.get(n); }); }
   if (s.chords && !piece.chords) piece.chords = computeChords(piece.notes, piece.measures);
   curNotes = notes;
   if (s.fit){
@@ -748,6 +767,7 @@ function renderView(){
       ? `<circle data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r}" fill="${c}"/>`
       : `<circle data-i="${i}" data-n="${n.onset.toFixed(4)}|${n.midi}" cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r - .7}" fill="var(--paper)" stroke="${c}" stroke-width="1.6"/>`);
     if (n.src === selNote) out.push(`<circle cx="${x(n.midi)}" cy="${y(n.onset)}" r="${r + 4}" fill="none" stroke="var(--ph)" stroke-width="2"/>`);
+    if (s.fingers && n.fg) out.push(`<text x="${x(n.midi) + (n.hand === 'R' ? -(r + 3) : r + 3)}" y="${y(n.onset) + 4}" text-anchor="${n.hand === 'R' ? 'end' : 'start'}" font-size="${clamp(s.sw * .9, 9, 14)}" font-weight="700" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${n.fg}</text>`);
   });
 
   outNotes.forEach(n => {
@@ -822,6 +842,7 @@ function renderRoll(s, notes, lo, hi){
     const xx = xOf(n.onset) + 4, below = n.midi < lo, yy = below ? top + rows * rh - 1 : top + 1, d = below ? -7 : 7;
     out.push(`<path d="M${xx} ${yy} l-5 ${d} h10 z" fill="${handColor(n.hand)}" fill-opacity=".45"><title>${noteLabel(n.midi, { labels: 'oct' })} is outside your keyboard</title></path>`);
   });
+  if (s.fingers && rh >= 8) notes.forEach(n => { if (!n.fg) return; const w = Math.max(3, n.dur * s.ppq - 2); if (w >= 12) out.push(`<text x="${xOf(n.onset) + w - 3}" y="${yOf(n.midi) + rh * .77}" text-anchor="end" font-size="${clamp(rh * .72, 7, 12)}" font-weight="700" fill="var(--paper)">${n.fg}</text>`); });
   if (s.labels !== 'off' && rh >= 8) notes.forEach(n => out.push(`<text x="${xOf(n.onset) + 4}" y="${yOf(n.midi) + rh * .77}" font-size="${clamp(rh * .7, 7, 12)}" font-weight="600" fill="var(--paper)">${noteLabel(n.midi, s)}</text>`));
   if (s.chords) piece.chords.forEach(c => out.push(`<text x="${xOf(c.q) + 3}" y="${top + rows * rh + 16}" font-size="12" font-weight="600" fill="var(--ink)">${c.name}</text>`));
   $('kbd').innerHTML = '';
@@ -1077,6 +1098,7 @@ function renderFalling(s, notes, lo, hi){
     const yy = yT(n.onset), lft = n.midi < lo, xx = lft ? left + 1 : W - right - 1, d = lft ? 7 : -7;
     out.push(`<path d="M${xx} ${yy} l${d} -5 v10 z" fill="${handColor(n.hand)}" fill-opacity=".45"><title>${noteLabel(n.midi, { labels: 'oct' })} is outside your keyboard</title></path>`);
   });
+  if (s.fingers) notes.forEach(n => { if (!n.fg) return; const h = Math.max(3, n.dur * s.ppq - 2); if (h >= 14 && s.sw >= 9) out.push(`<text x="${x(n.midi) + s.sw / 2}" y="${yT(n.onset + n.dur) + clamp(s.sw * .7, 8, 12) + 2}" text-anchor="middle" font-size="${clamp(s.sw * .7, 8, 12)}" font-weight="700" fill="var(--paper)">${n.fg}</text>`); });
   if (s.chords) piece.chords.forEach(c => out.push(`<text x="${W - right + 8}" y="${yT(c.q) - 4}" font-size="12" font-weight="600" fill="var(--ink)">${c.name}</text>`));
   const ky = 4, kh = kb - 16, kout = [];
   for (let m = lo; m <= hi; m++){
@@ -1138,6 +1160,7 @@ function renderStaff(s, notes){
     const open = n.dur >= 2;
     heads.push(`<ellipse data-n="${n.onset.toFixed(4)}|${n.midi}" opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * 1.25}" ry="${hs * .85}" transform="rotate(-20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
     if (s.labels !== 'off') heads.push(`<text x="${cx}" y="${cy - hs * 1.5}" text-anchor="middle" font-size="${clamp(hs * 1.5, 7, 12)}" font-weight="600" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${noteLabel(n.midi, s)}</text>`);
+    if (s.fingers && n.fg) heads.push(`<text x="${cx}" y="${n.hand === 'R' ? cy - hs * (s.labels !== 'off' ? 3.3 : 1.9) : cy + hs * 2.9}" text-anchor="middle" font-size="${clamp(hs * 1.6, 8, 14)}" font-weight="700" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${n.fg}</text>`);
     if (SHARP[n.midi % 12]) heads.push(`<text x="${cx - hs * 2.7}" y="${cy + hs * .9}" font-size="${hs * 2.6}" fill="${c}" text-anchor="middle">♯</text>`);
   });
   $('kbd').innerHTML = '';
@@ -1287,6 +1310,7 @@ function renderStaffV(s, notes){
     }
     const open = n.dur >= 2;
     heads.push(`<ellipse data-n="${n.onset.toFixed(4)}|${n.midi}" opacity="${n.out ? .3 : 1}" cx="${cx}" cy="${cy}" rx="${hs * .5}" ry="${hs * .68}" transform="rotate(20 ${cx} ${cy})" ${open ? `fill="var(--paper)" stroke="${c}" stroke-width="1.6"` : `fill="${c}"`}/>`);
+    if (s.fingers && n.fg) heads.push(`<text x="${cx - hs * .75}" y="${cy + 4}" text-anchor="end" font-size="${clamp(hs * 1.3, 8, 13)}" font-weight="700" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${n.fg}</text>`);
     if (SHARP[n.midi % 12]) heads.push(`<text x="${cx}" y="${cy - hs * .95}" font-size="${hs * 1.3}" fill="${c}" text-anchor="middle">\u266f</text>`);
     if (s.labels !== 'off') heads.push(`<text x="${cx + hs * .75}" y="${cy + 4}" font-size="${clamp(hs * 1.4, 7, 12)}" font-weight="600" fill="${c}" paint-order="stroke" stroke="var(--paper)" stroke-width="3">${noteLabel(n.midi, s)}</text>`);
   });
@@ -1598,7 +1622,7 @@ input.addEventListener('change', () => { if (input.files[0]) load(input.files[0]
 drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) load(f); });
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) load(f); });
-['view','ppq','sw','hands','dur','beats','color','fit','kbsize','labels','chords','keys','shift','oor','jkey','scrollMode'].forEach(id => $(id).addEventListener('input', render));
+['view','ppq','sw','hands','dur','beats','color','fit','kbsize','labels','chords','keys','shift','oor','jkey','scrollMode','fingers'].forEach(id => $(id).addEventListener('input', render));
 function resetScroll(){
   const sc = $('scroller');
   sc.scrollLeft = 0;
@@ -1779,6 +1803,7 @@ document.addEventListener('keydown', e => {
   else if (k === '[') edit(() => { n.dur = Math.max(sn, n.dur - sn); });
   else if (k === ']') edit(() => { n.dur += sn; });
   else if (k === 'h' || k === 'H') edit(() => { n.staffHand = n.staffHand === 'L' ? 'R' : 'L'; });
+  else if (/^[0-5]$/.test(k)) edit(() => { if (k === '0') delete n.finger; else n.finger = +k; });
   else act = false;
   if (act) e.preventDefault();
 });
@@ -1817,6 +1842,7 @@ function durPieces(d){
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 function exportMusicXML(){
   const DIV = 48, D = d => Math.max(1, Math.round(d * DIV));
+  const fmap = $('fingers').checked ? suggestFingering(piece.notes) : null;
   const ms = piece.measures.map(m => ({ ...m }));
   const last = () => ms[ms.length - 1];
   while (last().start + last().len < piece.total - 1e-6) ms.push({ ...last(), start: last().start + last().len, number: String(ms.length + 1) });
@@ -1827,7 +1853,7 @@ function exportMusicXML(){
       const a = m.start, b = a + m.len;
       if (end <= a + 1e-6 || n.onset >= b - 1e-6) return;
       const s = Math.max(n.onset, a), e = Math.min(end, b);
-      per[i][n.staffHand === 'L' ? 2 : 1].push({ midi: n.midi, on: s - a, d: e - s, tStop: s > n.onset + 1e-6, tStart: e < end - 1e-6 });
+      per[i][n.staffHand === 'L' ? 2 : 1].push({ midi: n.midi, on: s - a, d: e - s, tStop: s > n.onset + 1e-6, tStart: e < end - 1e-6, fg: fmap ? fmap.get(n) : n.finger });
     });
   });
   const rest = (d, v, st) => durPieces(d).map(p => `<note><rest/><duration>${D(p.d)}</duration><voice>${v}</voice>${p.type ? `<type>${p.type}</type>` + '<dot/>'.repeat(p.dots) : ''}${p.tri ? '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>' : ''}<staff>${st}</staff></note>`).join('');
@@ -1866,7 +1892,7 @@ function exportMusicXML(){
             g.forEach((sg, j) => {
               const [step, alt] = SPELL[sg.midi % 12];
               const tStop = pi > 0 || sg.tStop, tStart = pi < ps.length - 1 || sg.tStart;
-              x += `<note>${j ? '<chord/>' : ''}<pitch><step>${step}</step>${alt ? '<alter>1</alter>' : ''}<octave>${Math.floor(sg.midi / 12) - 1}</octave></pitch><duration>${D(p.d)}</duration>${tStop ? '<tie type="stop"/>' : ''}${tStart ? '<tie type="start"/>' : ''}<voice>${vn}</voice>${p.type ? `<type>${p.type}</type>` + '<dot/>'.repeat(p.dots) : ''}${p.tri ? '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>' : ''}<staff>${st}</staff>${tStop || tStart ? `<notations>${tStop ? '<tied type="stop"/>' : ''}${tStart ? '<tied type="start"/>' : ''}</notations>` : ''}</note>`;
+              x += `<note>${j ? '<chord/>' : ''}<pitch><step>${step}</step>${alt ? '<alter>1</alter>' : ''}<octave>${Math.floor(sg.midi / 12) - 1}</octave></pitch><duration>${D(p.d)}</duration>${tStop ? '<tie type="stop"/>' : ''}${tStart ? '<tie type="start"/>' : ''}<voice>${vn}</voice>${p.type ? `<type>${p.type}</type>` + '<dot/>'.repeat(p.dots) : ''}${p.tri ? '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>' : ''}<staff>${st}</staff>${tStop || tStart || sg.fg ? `<notations>${tStop ? '<tied type="stop"/>' : ''}${tStart ? '<tied type="start"/>' : ''}${sg.fg && !tStop ? `<technical><fingering>${sg.fg}</fingering></technical>` : ''}</notations>` : ''}</note>`;
             });
           });
           pos = g[0].on + g[0].d;
@@ -2525,6 +2551,203 @@ $('fMode').addEventListener('change', e => setFollowMode(e.target.value));
 ['fHands', 'fAccomp'].forEach(id => $(id).addEventListener('change', () => {
   if (P.playing){ const q = F.hold ? F.hold.onset : currentQ(); silence(); rebase(q); followStart(q); clearInterval(P.timer); P.timer = setInterval(schedule, 25); }
 }));
+
+/* ---------- Fingering suggestions ---------- */
+// Comfortable distances (in semitones) between two fingers of one hand, after Parncutt et al.:
+// [min practical, min comfortable, min relaxed, max relaxed, max comfortable, max practical]
+const FPAIR = { '1-2': [-4, -2, 1, 5, 8, 10], '1-3': [-7, -3, 3, 7, 10, 12], '1-4': [-5, -2, 5, 9, 12, 14],
+  '1-5': [-1, 1, 7, 10, 13, 15], '2-3': [1, 1, 1, 2, 3, 5], '2-4': [1, 1, 3, 4, 5, 7], '2-5': [2, 2, 5, 6, 8, 10],
+  '3-4': [1, 1, 1, 2, 2, 4], '3-5': [1, 1, 3, 4, 5, 7], '4-5': [1, 1, 1, 2, 3, 5] };
+const blackKey = m => BLACK.has(((m % 12) + 12) % 12);
+function pairCost(a, f, b, g, shift){
+  if (f === g) return a === b ? .5 : (shift ? 1 + Math.abs(b - a) * .5 : 8 + Math.abs(b - a));
+  let lo = f, hi = g, d = b - a;
+  if (f > g){ lo = g; hi = f; d = -d; }
+  const [minP, minC, minR, maxR, maxC, maxP] = FPAIR[lo + '-' + hi];
+  const thumb = lo === 1;
+  let c = 0;
+  if (d < minR) c += (minR - d) * (thumb ? 1 : 2);
+  if (d > maxR) c += (d - maxR) * (thumb ? 1 : 2);
+  if (d < minC) c += (minC - d) * 2;
+  if (d > maxC) c += (d - maxC) * 2;
+  if (d < minP || d > maxP) c += 10;
+  if (d < 0) c += 6;                                         // passing the thumb under or a finger over
+  if (lo === 1 && hi === 2 && d > 2) c += (d - 2) * .5;     // the index finger is happiest close to the thumb
+  if (Math.abs(d) >= 7 && !(lo === 1 && hi >= 4)) c += Math.abs(d) - 6;   // wide stretches belong to 1-4 or 1-5
+  return c;
+}
+function fingerCombos(k){
+  const out = [];
+  const rec = (start, acc) => {
+    if (acc.length === k){ out.push(acc.slice()); return; }
+    for (let f = start; f <= 5; f++){ acc.push(f); rec(f + 1, acc); acc.pop(); }
+  };
+  rec(1, []);
+  return out;
+}
+const COMBOS = [null, 1, 2, 3, 4, 5].map(k => k ? fingerCombos(k) : null);
+// Returns a Map from note object to suggested finger (1 = thumb ... 5 = pinky).
+// Fingers already written in the score (note.finger) are kept.
+function suggestFingering(list){
+  const res = new Map();
+  ['R', 'L'].forEach(h => {
+    const mine = list.filter(n => (n.hand || n.staffHand) === h);
+    const dir = h === 'R' ? 1 : -1;      // the left hand is a mirror image of the right
+    const byOn = new Map();
+    mine.forEach(n => { const k = n.onset.toFixed(4); if (!byOn.has(k)) byOn.set(k, []); byOn.get(k).push(n); });
+    const events = [...byOn.values()].sort((a, b) => a[0].onset - b[0].onset).map(ns => {
+      const sorted = ns.slice().sort((a, b) => dir * (a.midi - b.midi));
+      const uniq = [];
+      sorted.forEach(n => { if (!uniq.length || uniq[uniq.length - 1].midi !== n.midi) uniq.push(n); });
+      return { notes: sorted, keys: uniq, p: uniq.map(n => dir * n.midi), on: ns[0].onset, end: Math.max(...ns.map(n => n.onset + n.dur)) };
+    });
+    let i = 0;
+    while (i < events.length){
+      // Fingering runs through stretches the hand can play; a chord of more than five keys breaks the run.
+      let j = i;
+      while (j < events.length && events[j].keys.length <= 5) j++;
+      const run = events.slice(i, j);
+      if (run.length) solveRun(run, res);
+      i = Math.max(j, i + 1);
+    }
+  });
+  return res;
+}
+function solveRun(run, res){
+  const states = run.map(ev => {
+    const k = ev.keys.length;
+    let cands = COMBOS[k].slice();
+    const fixed = ev.keys.map(n => n.finger);
+    if (fixed.some(Boolean)){
+      const ok = cands.filter(c => c.every((f, idx) => !fixed[idx] || fixed[idx] === f));
+      if (ok.length) cands = ok;
+    }
+    return cands.map(c => {
+      let cost = 0;
+      for (let t = 0; t + 1 < k; t++) cost += pairCost(ev.p[t], c[t], ev.p[t + 1], c[t + 1]) * .5;
+      c.forEach((f, idx) => {
+        const m = ev.keys[idx].midi;
+        if (f === 1 && blackKey(m)) cost += k === 1 ? 4 : 1;
+        if (f === 5 && blackKey(m) && k === 1) cost += 1;
+        if (f === 4) cost += .3;
+      });
+      if (k >= 3){ if (c[0] !== 1) cost += 3; if (c[k - 1] !== 5) cost += 3; }
+      return { c, cost };
+    });
+  });
+  let prev = states[0].map(s => ({ total: s.cost, back: -1 }));
+  const backs = [prev];
+  for (let e = 1; e < run.length; e++){
+    const A = run[e - 1], B = run[e];
+    const gap = B.on - A.end;
+    const relax = gap >= .5 ? .35 : (B.on - A.on >= 2 ? .6 : 1);
+    const cur = states[e].map(sb => {
+      let best = Infinity, arg = 0;
+      states[e - 1].forEach((sa, ai) => {
+        let t;
+        if (A.p.length === 1 && B.p.length === 1) t = pairCost(A.p[0], sa.c[0], B.p[0], sb.c[0]);
+        else {
+          const la = A.p.length - 1, lb = B.p.length - 1;
+          t = .5 * (pairCost(A.p[0], sa.c[0], B.p[0], sb.c[0], true) + pairCost(A.p[la], sa.c[la], B.p[lb], sb.c[lb], true));
+        }
+        const v = prev[ai].total + t * relax;
+        if (v < best){ best = v; arg = ai; }
+      });
+      return { total: best + sb.cost, back: arg };
+    });
+    backs.push(cur);
+    prev = cur;
+  }
+  let k = prev.reduce((bi, s, idx, arr) => s.total < arr[bi].total ? idx : bi, 0);
+  for (let e = run.length - 1; e >= 0; e--){
+    const c = states[e][k].c, ev = run[e];
+    ev.notes.forEach(n => {
+      const idx = ev.keys.findIndex(u => u.midi === n.midi);
+      res.set(n, n.finger || c[idx]);
+    });
+    k = backs[e][k].back;
+  }
+}
+
+/* ---------- Fingering guide ---------- */
+const FG_EX = [
+  { t: 'Finger numbers', d: 'Both hands count from the thumb: 1 thumb, 2 index, 3 middle, 4 ring, 5 pinky. The numbers on the music use the same system.', lo: 48, hi: 67,
+    steps: [[[52, 1, 'L']], [[55, 5, 'R']]], show: [[48, 5, 'L'], [50, 4, 'L'], [52, 3, 'L'], [53, 2, 'L'], [55, 1, 'L'], [60, 1, 'R'], [62, 2, 'R'], [64, 3, 'R'], [65, 4, 'R'], [67, 5, 'R']] },
+  { t: 'Five-finger position', d: 'Rest one finger on each of five neighbouring keys and play without moving the hand. Right hand C\u2013G is 1 2 3 4 5; the left hand plays the same keys 5 4 3 2 1.', lo: 48, hi: 67,
+    steps: [60, 62, 64, 65, 67].map((m, i) => [[m, i + 1, 'R']]).concat([48, 50, 52, 53, 55].map((m, i) => [[m, 5 - i, 'L']])) },
+  { t: 'Root \u2013 fifth \u2013 octave (left hand)', d: 'The classic left-hand accompaniment. Pinky on the root, index finger on the fifth, thumb on the octave: 5 2 1. Move the whole shape to each new chord.', lo: 36, hi: 55,
+    steps: [[36, 5], [43, 2], [48, 1], [41, 5], [48, 2], [53, 1], [43, 5], [50, 2], [55, 1], [36, 5], [43, 2], [48, 1]].map(([m, f]) => [[m, f, 'L']]) },
+  { t: 'Triads in root position', d: 'Three-note chords. Right hand 1 3 5 (thumb on the root). Left hand 5 3 1 (pinky on the root).', lo: 48, hi: 67,
+    steps: [[[60, 1, 'R'], [64, 3, 'R'], [67, 5, 'R'], [48, 5, 'L'], [52, 3, 'L'], [55, 1, 'L']], [[65, 1, 'R'], [69, 3, 'R'], [72, 5, 'R'], [53, 5, 'L'], [57, 3, 'L'], [60, 1, 'L']], [[67, 1, 'R'], [71, 3, 'R'], [74, 5, 'R'], [43, 5, 'L'], [47, 3, 'L'], [50, 1, 'L']]] },
+  { t: 'Inversions', d: 'The same chord with a different note on the bottom. When the wide gap is at the top use 1 2 5; when it is at the bottom use 1 3 5. The left hand mirrors this: 5 3 1 or 5 2 1.', lo: 60, hi: 76,
+    steps: [[[60, 1, 'R'], [64, 3, 'R'], [67, 5, 'R']], [[64, 1, 'R'], [67, 2, 'R'], [72, 5, 'R']], [[67, 1, 'R'], [72, 3, 'R'], [76, 5, 'R']]] },
+  { t: 'Moving between chords smoothly', d: 'Keep shared notes under the same finger and move the others the shortest way. C (1 3 5) to F (1 3 5 with C\u2013F\u2013A) to G (1 2 5 with B\u2013D\u2013G) back to C.', lo: 59, hi: 72,
+    steps: [[[60, 1, 'R'], [64, 3, 'R'], [67, 5, 'R']], [[60, 1, 'R'], [65, 3, 'R'], [69, 5, 'R']], [[59, 1, 'R'], [62, 2, 'R'], [67, 5, 'R']], [[60, 1, 'R'], [64, 3, 'R'], [67, 5, 'R']]] },
+  { t: 'Major scale and passing the thumb', d: 'Right hand going up: 1 2 3, tuck the thumb under to F, then 1 2 3 4 5. Left hand going up: 5 4 3 2 1, cross 3 over the thumb to A, then 3 2 1. Going down, reverse it.', lo: 48, hi: 72,
+    steps: [[60, 1], [62, 2], [64, 3], [65, 1], [67, 2], [69, 3], [71, 4], [72, 5]].map(([m, f]) => [[m, f, 'R']]).concat([[48, 5], [50, 4], [52, 3], [53, 2], [55, 1], [57, 3], [59, 2], [60, 1]].map(([m, f]) => [[m, f, 'L']])) },
+  { t: 'Broken chords and arpeggios', d: 'Spread a chord out one note at a time. Right hand C E G C E G C: 1 2 3, thumb under, 1 2 3 5. Left hand: 5 4 2 1, then 3 over to E, 2 1.', lo: 48, hi: 84,
+    steps: [[60, 1], [64, 2], [67, 3], [72, 1], [76, 2], [79, 3], [84, 5]].map(([m, f]) => [[m, f, 'R']]).concat([[48, 5], [52, 4], [55, 2], [60, 1], [64, 3], [67, 2], [72, 1]].map(([m, f]) => [[m, f, 'L']])) },
+  { t: 'Alberti bass (left hand)', d: 'Root, fifth, third, fifth, over and over: 5 1 3 1. The hand stays still while the fingers rock.', lo: 48, hi: 57,
+    steps: [[48, 5], [55, 1], [52, 3], [55, 1], [48, 5], [55, 1], [52, 3], [55, 1], [47, 5], [55, 1], [50, 3], [55, 1], [48, 5], [55, 1], [52, 3], [55, 1]].map(([m, f]) => [[m, f, 'L']]), beat: .5 },
+  { t: 'Octaves', d: 'Thumb and pinky, 1 and 5, in both hands. Players with larger hands often use 4 on black keys for a smoother line.', lo: 36, hi: 72,
+    steps: [[[48, 5, 'L'], [36, 1, 'L'], [60, 1, 'R'], [72, 5, 'R']]].map(s => s).concat([[[36, 5, 'L'], [48, 1, 'L'], [60, 1, 'R'], [72, 5, 'R']]]) },
+];
+FG_EX[9].steps = [[[36, 5, 'L'], [48, 1, 'L'], [60, 1, 'R'], [72, 5, 'R']], [[41, 5, 'L'], [53, 1, 'L'], [65, 1, 'R'], [77, 5, 'R']], [[43, 5, 'L'], [55, 1, 'L'], [67, 1, 'R'], [79, 5, 'R']]];
+FG_EX[9].hi = 79;
+FG_EX[9].show = FG_EX[9].steps[0];
+FG_EX[2].show = [[36, 5, 'L'], [43, 2, 'L'], [48, 1, 'L']];
+FG_EX[8].show = [[48, 5, 'L'], [55, 1, 'L'], [52, 3, 'L']];
+FG_EX[3].show = FG_EX[3].steps[0];
+function fgDiagram(ex){
+  const lo = ex.lo - (blackKey(ex.lo) ? 1 : 0), hi = ex.hi + (blackKey(ex.hi) ? 1 : 0);
+  const whites = []; for (let m = lo; m <= hi; m++) if (!blackKey(m)) whites.push(m);
+  const ww = 22, W = whites.length * ww + 2, H = 96;
+  const xw = m => 1 + whites.indexOf(m) * ww;
+  const out = [];
+  whites.forEach(m => out.push(`<rect x="${xw(m)}" y="20" width="${ww - 1}" height="74" rx="2" fill="var(--key-w)" stroke="var(--rule)"/>`));
+  for (let m = lo; m <= hi; m++) if (blackKey(m)) out.push(`<rect x="${xw(m - 1) + ww * .65}" y="20" width="${ww * .7}" height="46" rx="2" fill="var(--key-b)"/>`);
+  const shown = new Map();
+  (ex.show || ex.steps.flat()).forEach(([m, f, h]) => { const k = h + m; if (!shown.has(k)) shown.set(k, [m, f, h]); });
+  const lift = new Map();
+  shown.forEach(([m, f, h]) => {
+    const cx = blackKey(m) ? xw(m - 1) + ww : xw(m) + ww / 2 - .5;
+    const n = lift.get(m) || 0; lift.set(m, n + 1);
+    const cy = (blackKey(m) ? 50 : 78) - n * 22;
+    const col = h === 'R' ? 'var(--rh)' : 'var(--lh)';
+    out.push(`<circle cx="${cx}" cy="${cy}" r="9" fill="${col}"/><text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${f}</text>`);
+  });
+  for (let m = lo; m <= hi; m++) if (m % 12 === 0) out.push(`<text x="${xw(m) + ww / 2}" y="13" text-anchor="middle" font-size="10" fill="var(--muted)">C${m / 12 - 1}</text>`);
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Instrument Sans, system-ui, sans-serif" role="img" aria-label="${esc(ex.t)} keyboard diagram">${out.join('')}</svg>`;
+}
+function loadFingerExample(ex){
+  const beat = ex.beat || 1, notes = [];
+  ex.steps.forEach((st, i) => st.forEach(([m, f, h]) => notes.push({ midi: m, onset: i * beat, dur: beat, staffHand: h, finger: f })));
+  const total = Math.max(4, Math.ceil(ex.steps.length * beat / 4) * 4);
+  const measures = [];
+  for (let q = 0, k = 1; q < total; q += 4, k++) measures.push({ start: q, len: 4, number: String(k), beatLen: 1 });
+  stop();
+  piece = { title: ex.t, composer: '', notes, measures, total, parts: 2, tempo: 72, edited: false };
+  resetEdits(); setTempo();
+  $('fingers').checked = true;
+  try { localStorage.setItem('klavar-fingers', '1'); } catch (e) {}
+  render(); resetScroll(); saveDoc();
+  $('fgDlg').close();
+}
+(() => {
+  const box = $('fgList');
+  FG_EX.forEach((ex, i) => {
+    const sec = document.createElement('section');
+    sec.className = 'fgex';
+    sec.innerHTML = `<h4>${esc(ex.t)}</h4><p class="hint">${esc(ex.d)}</p><div class="fgdia">${fgDiagram(ex)}</div>` + (i ? '<button class="fgload">Load this example</button>' : '');
+    const b = sec.querySelector('.fgload');
+    if (b) b.addEventListener('click', () => loadFingerExample(ex));
+    box.appendChild(sec);
+  });
+})();
+$('fgGuide').addEventListener('click', () => { if ($('fgDlg').showModal) $('fgDlg').showModal(); else $('fgDlg').setAttribute('open', ''); });
+$('fgClose').addEventListener('click', () => $('fgDlg').close());
+try { if (localStorage.getItem('klavar-fingers') === '1') $('fingers').checked = true; } catch (e) {}
+$('fingers').addEventListener('change', () => { try { localStorage.setItem('klavar-fingers', $('fingers').checked ? '1' : '0'); } catch (e) {} });
 
 $('print').addEventListener('click', () => window.print());
 $('sample').addEventListener('click', () => { try { stop(); piece = parseMusicXML(buildSample()); resetEdits(); setTempo(); render(); resetScroll(); } catch (e){ showError(e); } });
