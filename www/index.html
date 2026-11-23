@@ -169,8 +169,8 @@ input[type=range]:disabled{opacity:.4}
 
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="Open a MusicXML file">
       <strong>Open a MusicXML file</strong>
-      <span>Drop it here or click to browse<br>MusicXML (.musicxml, .xml, .mxl) or MuseScore (.mscz)</span>
-      <input type="file" id="file" accept=".xml,.musicxml,.mxl,.zip,.mscz,.mscx" hidden>
+      <span>Drop it here or click to browse<br>MusicXML, MuseScore (.mscz) or MIDI (.mid)</span>
+      <input type="file" id="file" accept=".xml,.musicxml,.mxl,.zip,.mscz,.mscx,.mid,.midi" hidden>
     </div>
     <button class="chordbtn" id="chordBtn">🎸 Import a chord chart</button>
 
@@ -552,6 +552,86 @@ function markEnding(R, from, to, nums){
 }
 const endingNums = s => (String(s || '1').match(/\d+/g) || ['1']).map(Number);
 
+/* ---------- Standard MIDI file import (.mid / .midi) ---------- */
+function parseMIDI(buf, fileName){
+  const d = new DataView(buf), u8 = new Uint8Array(buf);
+  const str = (o, n) => String.fromCharCode(...u8.subarray(o, o + n));
+  if (str(0, 4) !== 'MThd') throw new Error('This is not a MIDI file.');
+  const ntr = d.getUint16(10), div = d.getUint16(12);
+  if (div & 0x8000) throw new Error('This MIDI file uses SMPTE timing, which Klavar can’t read. Re-save it from your music program as a standard MIDI file.');
+  const tpq = div || 480;
+  let p = 8 + d.getUint32(4);
+  const groups = new Map();
+  let tempo = 0, tsN = 4, tsD = 4, title = '', tsSet = false;
+  for (let t = 0; t < ntr && p + 8 <= u8.length; t++){
+    if (str(p, 4) !== 'MTrk'){ p += 8 + d.getUint32(p + 4); t--; if (p >= u8.length) break; continue; }
+    const end = p + 8 + d.getUint32(p + 4);
+    let i = p + 8, tick = 0, status = 0;
+    const open = new Map();
+    const vlq = () => { let v = 0, b; do { b = u8[i++]; v = (v << 7) | (b & 0x7f); } while (b & 0x80 && i < end); return v; };
+    while (i < end){
+      tick += vlq();
+      let b = u8[i];
+      if (b & 0x80){ status = b; i++; } else if (!status) break;
+      if (status === 0xff){
+        const type = u8[i++], len = vlq(), o = i; i += len;
+        if (type === 0x51 && len === 3 && !tempo) tempo = 60000000 / ((u8[o] << 16) | (u8[o + 1] << 8) | u8[o + 2]);
+        else if (type === 0x58 && len >= 2 && !tsSet){ tsN = u8[o] || 4; tsD = Math.pow(2, u8[o + 1]) || 4; tsSet = true; }
+        else if (type === 0x03 && t === 0 && !title) title = str(o, len).trim();
+        status = 0;
+        continue;
+      }
+      if (status === 0xf0 || status === 0xf7){ i += vlq(); status = 0; continue; }
+      const hi = status & 0xf0, ch = status & 0x0f;
+      const a = u8[i++], v = (hi === 0xc0 || hi === 0xd0) ? 0 : u8[i++];
+      if (ch === 9) continue;                                  // channel 10 is drums
+      const key = t + ':' + ch;
+      if (hi === 0x90 && v > 0){
+        const k2 = key + ':' + a;
+        if (!open.has(k2)) open.set(k2, []);
+        open.get(k2).push(tick);
+      } else if (hi === 0x80 || (hi === 0x90 && v === 0)){
+        const st = open.get(key + ':' + a);
+        if (st && st.length){
+          const on = st.shift();
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push({ midi: a, on: on / tpq, off: tick / tpq });
+        }
+      }
+    }
+    p = end;
+  }
+  const all = [...groups.values()].flat();
+  if (!all.length) throw new Error('No notes were found in this MIDI file (drum tracks are skipped).');
+  // Snap to the nearest sixteenth or eighth-note triplet, so loosely played or
+  // machine-transcribed MIDI still reads as music.
+  const snap = q => { const a = Math.round(q * 4) / 4, b = Math.round(q * 3) / 3; return Math.abs(a - q) <= Math.abs(b - q) + .01 ? a : b; };
+  // Hands: two or more instruments/tracks → the higher one is the right hand;
+  // a single track (or a whole band) → split at middle C.
+  const gl = [...groups.values()].map(g => ({ g, mean: g.reduce((s, n) => s + n.midi, 0) / g.length }));
+  gl.sort((x, y) => y.mean - x.mean);
+  const byTrack = gl.length === 2;
+  const notes = [];
+  gl.forEach((x, gi) => x.g.forEach(n => {
+    const on = snap(n.on);
+    let off = snap(n.off);
+    if (off - on < .25) off = on + .25;
+    notes.push({ midi: n.midi, onset: on, dur: off - on, staffHand: byTrack ? (gi === 0 ? 'R' : 'L') : (n.midi >= 60 ? 'R' : 'L') });
+  }));
+  // Drop exact duplicates that snapping can create.
+  const seen = new Set();
+  const uniq = notes.filter(n => { const k = n.midi + '|' + n.onset + '|' + n.staffHand; if (seen.has(k)) return false; seen.add(k); return true; });
+  // Remove leading silence of whole bars.
+  const barQ = tsN * 4 / tsD, beatQ = 4 / tsD;
+  const first = Math.min(...uniq.map(n => n.onset)), shift = Math.floor(first / barQ + 1e-6) * barQ;
+  uniq.forEach(n => { n.onset -= shift; });
+  let last = 0; uniq.forEach(n => { last = Math.max(last, n.onset + n.dur); });
+  const nBars = Math.max(1, Math.ceil(last / barQ - 1e-6)), measures = [];
+  for (let k = 0; k < nBars; k++) measures.push({ start: k * barQ, len: barQ, number: String(k + 1), beatLen: beatQ });
+  return { title: title || (fileName || 'MIDI file').replace(/\.(midi?|kar)$/i, ''), composer: '', notes: uniq, measures,
+    total: nBars * barQ, parts: gl.length, tempo: tempo > 0 && tempo < 400 ? tempo : 100 };
+}
+
 function parseScore(text){
   return /<museScore[\s>]/.test(text.slice(0, 3000)) ? parseMSCX(text) : parseMusicXML(text);
 }
@@ -654,7 +734,8 @@ function parseMSCX(text){
 async function readFile(file){
   // Decide by the file's contents, not its name: phones often hide or change extensions.
   const buf = await file.arrayBuffer();
-  const head = new Uint8Array(buf.slice(0, 2));
+  const head = new Uint8Array(buf.slice(0, 4));
+  if (head[0] === 0x4D && head[1] === 0x54 && head[2] === 0x68 && head[3] === 0x64) return parseMIDI(buf, file.name);
   if (head[0] === 0x50 && head[1] === 0x4B){
     const zip = await JSZip.loadAsync(buf);
     let path = null;
@@ -1336,7 +1417,7 @@ function showError(e){
 }
 
 async function load(file){
-  try { stop(); piece = parseScore(await readFile(file)); resetEdits(); setTempo(); render(); resetScroll(); }
+  try { stop(); const data = await readFile(file); piece = typeof data === 'string' ? parseScore(data) : data; resetEdits(); setTempo(); render(); resetScroll(); }
   catch (e){ showError(e); }
 }
 

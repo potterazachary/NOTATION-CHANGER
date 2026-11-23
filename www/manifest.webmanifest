@@ -34,6 +34,10 @@
         {
           "name": "score",
           "accept": [
+            "audio/x-midi",
+            "audio/midi",
+            ".midi",
+            ".mid",
             ".mscz",
             ".mscx",
             ".mxl",

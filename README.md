@@ -277,6 +277,14 @@ note and type 1-5 to set its finger (0 clears it). **Fingering guide** explains 
 patterns, with keyboard diagrams and examples you can load and play. Exported MusicXML includes
 the fingering.
 
+## 14. MIDI files
+
+Klavar opens `.mid` / `.midi` files like any other score. Drum tracks are skipped, timing is
+snapped to sixteenths or eighth-note triplets, and the tempo, time signature and title are read
+from the file. With two instruments or tracks the higher one becomes the right hand; otherwise
+notes are split at middle C (change this under **Assign hands**). Audio-to-MIDI tools such as
+Basic Pitch produce files Klavar can open this way.
+
 ## Licenses of included parts
 
 Capacitor (MIT), Capgo capacitor-updater (MPL-2.0), keep-awake (MIT), OpenSheetMusicDisplay (BSD-3-Clause), JSZip (MIT), oemer (MIT),
